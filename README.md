@@ -12,6 +12,7 @@ This library is compatible with:
 
 - [Demo server](https://github.com/altcha-org/altcha-starter-java)
 
+<!--
 ## Installation
 
 To install the ALTCHA Java Library, add the following dependency to your `pom.xml` if you use Maven:
@@ -29,6 +30,7 @@ Or, if you use Gradle, add the following to your `build.gradle`:
 ```groovy
 implementation 'org.altcha:altcha:1.0.0'
 ```
+-->
 
 ## Usage
 
