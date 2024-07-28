@@ -1,0 +1,41 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+    id 'signing'
+}
+
+group = 'org.altcha'
+version = '1.0-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
+    implementation 'org.json:json:20210307'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            from components.java
+            groupId = 'org.altcha'
+            artifactId = 'altcha'
+            version = '1.0-SNAPSHOT'
+        }
+    }
+    repositories {
+        maven {
+            url = uri('https://github.com/altcha-org/altcha-lib-java') 
+        }
+    }
+}
+
+signing {
+    sign publishing.publications.mavenJava
+}
