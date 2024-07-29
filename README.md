@@ -1,6 +1,6 @@
 # ALTCHA Java Library
 
-The ALTCHA Java Library is a lightweight, zero-dependency library designed for creating and verifying [ALTCHA](https://altcha.org) challenges.
+The ALTCHA Java Library is a lightweight library designed for creating and verifying [ALTCHA](https://altcha.org) challenges.
 
 ## Compatibility
 
@@ -46,11 +46,10 @@ public class Example {
 
         try {
             // Create a new challenge
-            Challenge challenge = Altcha.createChallenge(new ChallengeOptions.Builder()
-                .hmacKey(hmacKey)
-                .maxNumber(100000) // the maximum random number
-                .build()
-            );
+            ChallengeOptions options = new ChallengeOptions()
+                .setMaxNumber(100000L) // the maximum random number
+                .setHmacKey(hmacKey)
+                .setExpiresInSeconds(3600) // 1 hour expiration
 
             System.out.println("Challenge created: " + challenge);
 

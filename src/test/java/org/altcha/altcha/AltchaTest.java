@@ -106,8 +106,8 @@ public class AltchaTest {
         payload.signature = Altcha.hmacHex(Altcha.Algorithm.SHA256, hash, "secret");
         payload.verified = true;
 
-        boolean isValid = Altcha.verifyServerSignature(payload, "secret");
-        assertTrue(isValid);
+        Altcha.ServerSignatureVerification verification = Altcha.verifyServerSignature(payload, "secret");
+        assertTrue(verification.verified);
     }
 
     @Test
