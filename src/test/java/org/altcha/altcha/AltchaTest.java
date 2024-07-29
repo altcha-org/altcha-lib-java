@@ -3,7 +3,6 @@ package org.altcha.altcha;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.util.HashMap;
 import java.util.Map;
 

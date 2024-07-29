@@ -12,9 +12,32 @@ This library is compatible with:
 
 - [Demo server](https://github.com/altcha-org/altcha-starter-java)
 
-<!--
 ## Installation
 
+To install the ALTCHA Java Library, add [JitPack](https://jitpack.io) repository to your `pom.xml` if you use Maven:
+
+```xml
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+```
+
+and add the following dependency:
+
+```xml
+<dependency>
+    <groupId>com.github.altcha-org</groupId>
+    <artifactId>altcha-lib-java</artifactId>
+    <version>v1.0.0</version>
+</dependency>
+```
+
+For Gradle, follow the guide in the [JitPack's documentation](https://jitpack.io).
+
+<!--
 To install the ALTCHA Java Library, add the following dependency to your `pom.xml` if you use Maven:
 
 ```xml
@@ -39,6 +62,9 @@ Here’s a basic example of how to use the ALTCHA Java Library:
 ```java
 import java.util.HashMap;
 import java.util.Map;
+
+import org.altcha.altcha.Altcha;
+import org.altcha.altcha.Altcha.ChallengeOptions;
 
 public class Example {
     public static void main(String[] args) {
