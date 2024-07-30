@@ -31,7 +31,11 @@ publishing {
     }
     repositories {
         maven {
-            url = uri('https://github.com/altcha-org/altcha-lib-java') 
+            url = uri('https://github.com/altcha-org/altcha-lib-java')
         }
     }
+}
+
+signing {
+    sign publishing.publications.mavenJava
 }
