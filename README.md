@@ -55,12 +55,17 @@ implementation 'org.altcha:altcha:1.0.0'
 ```
 -->
 
-## Warning
-This library relies on SecureRandom which may hang if there is not sufficient 'noise' on your Linux server.
-One fix is to add this to your JVM invocation:
+## Random Number Generator
+
+By default, this library uses a non-secure random number generator to avoid problems with insufficient noise. To enforce the use of a secure random number generator, set `secureRandomNumber` to `true` in the `ChallengeOptions` when generating a new challenge.
+
+If you find that the generator is slow or hangs due to insufficient entropy, you can add the following JVM option to your invocation:
+
 ```
 -Djava.security.egd=file:/dev/./urandom
 ```
+
+This option forces the JVM to use `/dev/urandom` for generating random numbers, which can help resolve issues related to entropy.
 
 ## Usage
 
