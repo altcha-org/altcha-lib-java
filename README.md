@@ -14,28 +14,24 @@ This library is compatible with:
 
 ## Installation
 
-To install the ALTCHA Java Library, add [JitPack](https://jitpack.io) repository to your `pom.xml` if you use Maven:
+Maven Central: [org.altcha/altcha](https://central.sonatype.com/artifact/org.altcha/altcha)
 
-```xml
-<repositories>
-    <repository>
-        <id>jitpack.io</id>
-        <url>https://jitpack.io</url>
-    </repository>
-</repositories>
-```
-
-and add the following dependency:
+Maven:
 
 ```xml
 <dependency>
-    <groupId>com.github.altcha-org</groupId>
-    <artifactId>altcha-lib-java</artifactId>
-    <version>v1.0.0</version>
+    <groupId>org.altcha</groupId>
+    <artifactId>altcha</artifactId>
+    <version>1.1.0</version>
 </dependency>
 ```
 
-For Gradle, follow the guide in the [JitPack's documentation](https://jitpack.io).
+Gradle:
+
+
+```
+implementation 'org.altcha:altcha:1.1.0'
+```
 
 <!--
 To install the ALTCHA Java Library, add the following dependency to your `pom.xml` if you use Maven:
