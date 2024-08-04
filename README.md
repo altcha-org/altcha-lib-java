@@ -22,7 +22,7 @@ Maven:
 <dependency>
     <groupId>org.altcha</groupId>
     <artifactId>altcha</artifactId>
-    <version>1.1.0</version>
+    <version>1.1.1</version>
 </dependency>
 ```
 
@@ -30,26 +30,8 @@ Gradle:
 
 
 ```
-implementation 'org.altcha:altcha:1.1.0'
+implementation 'org.altcha:altcha:1.1.1'
 ```
-
-<!--
-To install the ALTCHA Java Library, add the following dependency to your `pom.xml` if you use Maven:
-
-```xml
-<dependency>
-    <groupId>org.altcha</groupId>
-    <artifactId>altcha</artifactId>
-    <version>1.0.0</version>
-</dependency>
-```
-
-Or, if you use Gradle, add the following to your `build.gradle`:
-
-```groovy
-implementation 'org.altcha:altcha:1.0.0'
-```
--->
 
 ## Random Number Generator
 
