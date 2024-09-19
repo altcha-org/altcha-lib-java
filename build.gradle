@@ -7,7 +7,7 @@ plugins {
 
 group = 'org.altcha'
 archivesBaseName = 'altcha'
-version = '1.1.1'
+version = '1.1.2'
 
 java {
     sourceCompatibility = JavaVersion.VERSION_1_8
@@ -23,7 +23,7 @@ repositories {
 
 dependencies {
     testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.7.0'
-    implementation 'org.json:json:20210307'
+    implementation 'org.json:json:20240303'
 }
 
 test {
