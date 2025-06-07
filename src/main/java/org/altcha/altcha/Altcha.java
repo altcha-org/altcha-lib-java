@@ -203,13 +203,13 @@ public class Altcha {
 
         public String classification;
         /**
-         * @deprecated Use {@link #getAdditionalField("location.countryCode")} instead with Sentinel. 
+         * @deprecated Use {@link #getAdditionalField location.countryCode} instead with Sentinel. 
          */
         @Deprecated(since = "1.2")
         public String country;
 
         /**
-         * @deprecated Use {@link #getAdditionalField("text.language")} instead with Sentinel. 
+         * @deprecated Use {@link #getAdditionalField text.language} instead with Sentinel. 
          */
         @Deprecated(since = "1.2")
         public String detectedLanguage;
