@@ -25,6 +25,8 @@ import org.json.JSONObject;
  * solving challenges, and verifying server signatures.
  */
 public class Altcha {
+    // Static SecureRandom instance for thread-safe reuse
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
 
     /**
      * Enumeration for supported hashing and HMAC algorithms.
@@ -225,7 +227,7 @@ public class Altcha {
      */
     public static byte[] randomBytes(int length) {
         byte[] bytes = new byte[length];
-        new SecureRandom().nextBytes(bytes);
+        SECURE_RANDOM.nextBytes(bytes);
         return bytes;
     }
 
@@ -236,7 +238,12 @@ public class Altcha {
      * @return The generated random integer.
      */
     public static int randomInt(long max) {
-        return ThreadLocalRandom.current().nextInt((int) max);
+        if (max <= 0) {
+            throw new IllegalArgumentException("Max must be positive");
+        }
+        // Ensure we don't overflow when casting to int
+        int intMax = (int) Math.min(max, Integer.MAX_VALUE);
+        return ThreadLocalRandom.current().nextInt(intMax);
     }
 
     /**
@@ -246,8 +253,12 @@ public class Altcha {
      * @return The generated random integer.
      */
     public static int randomIntSecure(long max) {
-        SecureRandom random = new SecureRandom();
-        return random.nextInt((int) max);
+        if (max <= 0) {
+            throw new IllegalArgumentException("Max must be positive");
+        }
+        // Ensure we don't overflow when casting to int
+        int intMax = (int) Math.min(max, Integer.MAX_VALUE);
+        return SECURE_RANDOM.nextInt(intMax);
     }
 
     /**
