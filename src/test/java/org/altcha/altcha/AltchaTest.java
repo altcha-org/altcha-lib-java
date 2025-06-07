@@ -100,13 +100,14 @@ public class AltchaTest {
     public void testVerifyServerSignature() throws Exception {
         Altcha.ServerSignaturePayload payload = new Altcha.ServerSignaturePayload();
         payload.algorithm = Altcha.Algorithm.SHA256;
-        payload.verificationData = "score=3&verified=true";
+        payload.verificationData = "score=3&verified=true&location.countryCode=US";
         byte[] hash = Altcha.hash(payload.algorithm, payload.verificationData.getBytes(StandardCharsets.UTF_8));
         payload.signature = Altcha.hmacHex(Altcha.Algorithm.SHA256, hash, "secret");
         payload.verified = true;
 
         Altcha.ServerSignatureVerification verification = Altcha.verifyServerSignature(payload, "secret");
         assertTrue(verification.verified);
+        assertEquals("US", verification.verificationData.getAdditionalField("location.countryCode"));
     }
 
     @Test

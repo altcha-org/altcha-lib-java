@@ -180,6 +180,8 @@ public class Altcha {
      */
     public static class ServerSignaturePayload {
         public Algorithm algorithm;
+        public String apiKey;
+        public String id;
         public String verificationData;
         public String signature;
         public boolean verified;
@@ -197,9 +199,21 @@ public class Altcha {
      * Contains details about server signature verification.
      */
     public static class ServerSignatureVerificationData {
+        // Predefined fields
+
         public String classification;
+        /**
+         * @deprecated Use {@link #getAdditionalField("location.countryCode")} instead with Sentinel. 
+         */
+        @Deprecated(since = "1.2")
         public String country;
+
+        /**
+         * @deprecated Use {@link #getAdditionalField("text.language")} instead with Sentinel. 
+         */
+        @Deprecated(since = "1.2")
         public String detectedLanguage;
+
         public String email;
         public Long expire;
         public String[] fields;
@@ -209,6 +223,27 @@ public class Altcha {
         public double score;
         public long time;
         public boolean verified;
+        
+        // Map for additional arbitrary fields
+        public final Map<String, String> additionalFields = new HashMap<>();
+
+        /**
+         * Gets an additional field value by name.
+         * @param name The field name
+         * @return The field value, or null if not found
+         */
+        public String getAdditionalField(String name) {
+            return additionalFields.get(name);
+        }
+
+        /**
+         * Checks if an additional field exists.
+         * @param name The field name
+         * @return true if the field exists, false otherwise
+         */
+        public boolean hasAdditionalField(String name) {
+            return additionalFields.containsKey(name);
+        }
     }
 
     /**
@@ -497,6 +532,12 @@ public class Altcha {
         parsedPayload.verificationData = jsonObject.getString("verificationData");
         parsedPayload.signature = jsonObject.getString("signature");
         parsedPayload.verified = jsonObject.getBoolean("verified");
+        if (jsonObject.has("apiKey")) {
+            parsedPayload.apiKey = jsonObject.getString("apiKey");
+        }
+        if (jsonObject.has("id")) {
+            parsedPayload.id = jsonObject.getString("id");
+        }
 
         return verifyServerSignatureInternal(parsedPayload, hmacKey);
     }
@@ -520,11 +561,12 @@ public class Altcha {
         return result;
     }
 
-    private static ServerSignatureVerificationData extractVerificationData(String verificationDataStr)
-            throws Exception {
+    private static ServerSignatureVerificationData extractVerificationData(String verificationDataStr) throws Exception {
         Map<String, String> params = extractParams(verificationDataStr);
 
         ServerSignatureVerificationData verificationData = new ServerSignatureVerificationData();
+        
+        // Set predefined fields
         verificationData.classification = params.get("classification");
         verificationData.country = params.get("country");
         verificationData.detectedLanguage = params.get("detectedLanguage");
@@ -536,7 +578,16 @@ public class Altcha {
         verificationData.reasons = params.containsKey("reasons") ? params.get("reasons").split(",") : null;
         verificationData.score = params.containsKey("score") ? Double.parseDouble(params.get("score")) : 0.0;
         verificationData.time = params.containsKey("time") ? Long.parseLong(params.get("time")) : 0L;
-        verificationData.verified = Boolean.parseBoolean(params.get("verified"));
+        verificationData.verified = Boolean.parseBoolean(params.getOrDefault("verified", "false"));
+
+        // Add all remaining parameters as additional fields
+        for (Map.Entry<String, String> entry : params.entrySet()) {
+            String key = entry.getKey();
+            // Skip predefined fields
+            if (!isPredefinedField(key)) {
+                verificationData.additionalFields.put(key, entry.getValue());
+            }
+        }
 
         return verificationData;
     }
@@ -660,5 +711,20 @@ public class Altcha {
             hexString.append(hex);
         }
         return hexString.toString();
+    }
+
+    private static boolean isPredefinedField(String fieldName) {
+        return fieldName.equals("classification") ||
+            fieldName.equals("country") ||
+            fieldName.equals("detectedLanguage") ||
+            fieldName.equals("email") ||
+            fieldName.equals("expire") ||
+            fieldName.equals("fields") ||
+            fieldName.equals("fieldsHash") ||
+            fieldName.equals("ipAddress") ||
+            fieldName.equals("reasons") ||
+            fieldName.equals("score") ||
+            fieldName.equals("time") ||
+            fieldName.equals("verified");
     }
 }
