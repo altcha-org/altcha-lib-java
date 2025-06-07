@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>org.altcha</groupId>
     <artifactId>altcha</artifactId>
-    <version>1.1.2</version>
+    <version>1.2.0</version>
     <name>org.altcha.altcha</name>
     <description>A library for creating and verifying ALTCHA challenges.</description>
     <url>https://github.com/altcha-org/altcha-lib-java</url>
