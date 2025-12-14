@@ -376,6 +376,11 @@ public class Altcha {
             salt += "?" + encodeParams(params);
         }
 
+        // Add a delimiter to prevent parameter splicing
+        if (!salt.endsWith("&")) {
+            salt += "&";
+        }
+
         long number = options.number != null ? options.number
                 : (options.secureRandomNumber ? randomIntSecure(maxNumber) : randomInt(maxNumber));
         String challengeStr = hashHex(algorithm, salt + number);

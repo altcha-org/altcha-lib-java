@@ -75,6 +75,25 @@ public class AltchaTest {
     }
 
     @Test
+    public void testVerifySolutionSaltSplicing() throws Exception {
+        Altcha.ChallengeOptions options = new Altcha.ChallengeOptions();
+        options.number = 123L;
+        options.hmacKey = "secret";
+
+        Altcha.Challenge challenge = Altcha.createChallenge(options);
+
+        Altcha.Payload payload = new Altcha.Payload();
+        payload.algorithm = challenge.algorithm;
+        payload.challenge = challenge.challenge;
+        payload.number = 23L;
+        payload.salt = challenge.salt + "1";
+        payload.signature = challenge.signature;
+
+        boolean isValid = Altcha.verifySolution(payload, options.hmacKey, false);
+        assertFalse(isValid);
+    }
+
+    @Test
     public void testExtractParams() throws Exception {
         Map<String, String> params = Altcha.extractParams("testSalt?param1=value1&param2=value2");
         assertEquals(2, params.size());
