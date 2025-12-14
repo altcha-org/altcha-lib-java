@@ -22,7 +22,7 @@ Maven:
 <dependency>
     <groupId>org.altcha</groupId>
     <artifactId>altcha</artifactId>
-    <version>1.2.0</version>
+    <version>1.3.0</version>
 </dependency>
 ```
 
@@ -30,7 +30,7 @@ Gradle:
 
 
 ```
-implementation 'org.altcha:altcha:1.2.0'
+implementation 'org.altcha:altcha:1.3.0'
 ```
 
 ## Random Number Generator
