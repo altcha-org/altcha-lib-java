@@ -65,7 +65,9 @@ public class Example {
             ChallengeOptions options = new ChallengeOptions()
                 .setMaxNumber(100000L) // the maximum random number
                 .setHmacKey(hmacKey)
-                .setExpiresInSeconds(3600) // 1 hour expiration
+                .setExpiresInSeconds(3600); // 1 hour expiration
+
+            Altcha.Challenge challenge = Altcha.createChallenge(options);
 
             System.out.println("Challenge created: " + challenge);
 
