@@ -1,0 +1,23 @@
+plugins {
+    id 'application'
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+application {
+    mainClass = 'org.altcha.altcha.example.Argon2Example'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(':')
+    implementation 'org.springframework.security:spring-security-crypto:6.3.0'
+    // Bouncy Castle is required by spring-security-crypto for Argon2 support
+    implementation 'org.bouncycastle:bcprov-jdk18on:1.78.1'
+}

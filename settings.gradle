@@ -1,0 +1,3 @@
+rootProject.name = 'altcha'
+include 'examples:server'
+include 'examples:argon2'

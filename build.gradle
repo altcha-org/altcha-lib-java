@@ -1,0 +1,87 @@
+plugins {
+    id 'java'
+    id 'maven-publish'
+    id 'signing'
+    id 'com.gradleup.nmcp' version '1.4.4'
+}
+
+group = 'org.altcha'
+version = '2.0.0-beta.1'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+
+    withJavadocJar()
+    withSourcesJar()
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation 'org.junit.jupiter:junit-jupiter-engine:5.10.0'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.0'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.10.0'
+    implementation 'org.json:json:20240303'
+}
+
+test {
+    useJUnitPlatform()
+}
+
+javadoc {
+    options.addStringOption('Xdoclint:none', '-quiet')
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId = 'org.altcha'
+            artifactId = 'altcha'
+
+            from components.java
+
+            pom {
+                name = 'org.altcha.altcha'
+                description = 'A library for creating and verifying ALTCHA challenges.'
+                url = 'https://github.com/altcha-org/altcha-lib-java'
+                inceptionYear = '2024'
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'http://www.opensource.org/licenses/mit-license.php'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'daniel'
+                        name = 'Daniel Regeci'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:https://github.com/altcha-org/altcha-lib-java.git'
+                    developerConnection = 'scm:git:ssh://github.com/altcha-org/altcha-lib-java.git'
+                    url = 'http://github.com/altcha-org/altcha-lib-java'
+                }
+            }
+        }
+    }
+
+}
+
+signing {
+    def key        = System.getenv('SIGNING_SECRET_KEY')
+    def passphrase = System.getenv('SIGNING_PASSPHRASE')
+    if (key) useInMemoryPgpKeys(key, passphrase)
+    sign publishing.publications.maven
+}
+
+nmcp {
+    publishAllPublicationsToCentralPortal {
+        username = System.getenv('MAVEN_CENTRAL_USERNAME')
+        password = System.getenv('MAVEN_CENTRAL_PASSWORD')
+        publishingType = 'AUTOMATIC'
+    }
+}
