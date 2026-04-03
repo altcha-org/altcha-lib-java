@@ -2,6 +2,11 @@
 
 The ALTCHA Java Library is a lightweight library designed for creating and verifying [ALTCHA](https://altcha.org) challenges.
 
+> [!TIP]
+> A new version of the library with the updated PoW mechanism is available on the `beta` release channel.
+> 
+> Documentation: https://github.com/altcha-org/altcha-lib-java/tree/v2  
+
 ## Compatibility
 
 This library is compatible with:
