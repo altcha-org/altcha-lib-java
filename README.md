@@ -188,6 +188,47 @@ if (result.verified()) {
 }
 ```
 
+### v2 API reference
+
+#### Static methods
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `createChallenge(CreateChallengeOptions)` | `Challenge` | Creates a new signed v2 challenge |
+| `signChallenge(String, ChallengeParameters, byte[], String, String)` | `Challenge` | Signs challenge parameters with HMAC |
+| `solveChallenge(Challenge, KeyDerivationFunction)` | `Solution` | Brute-forces a solution (counter start=0, step=1) |
+| `solveChallenge(Challenge, KeyDerivationFunction, int, int)` | `Solution` | Brute-forces a solution with custom start/step |
+| `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
+| `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
+| `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
+| `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
+| `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |
+| `verifyFieldsHash(Map<String,String>, String[], String, String)` | `boolean` | Verifies a Sentinel fields hash |
+| `verifyServerSignature(ServerSignaturePayload, String)` | `ServerSignatureVerification` | Verifies a typed Sentinel server-signature payload |
+| `verifyServerSignature(String, String)` | `ServerSignatureVerification` | Verifies a base64-encoded Sentinel payload |
+| `kdf(String)` | `KeyDerivationFunction` | Returns the built-in KDF for the given algorithm string |
+| `pbkdf2()` | `KeyDerivationFunction` | PBKDF2-based KDF factory |
+| `sha()` | `KeyDerivationFunction` | SHA-iterative KDF factory |
+| `randomBytes(int)` | `byte[]` | Generates cryptographically random bytes |
+| `bytesToHex(byte[])` | `String` | Encodes a byte array as a lowercase hex string |
+
+#### Data types
+
+| Type | Kind | Description |
+|------|------|-------------|
+| `CreateChallengeOptions` | mutable builder | Options for `createChallenge` — algorithm, cost, secrets, expiry, data, KDF override |
+| `ChallengeParameters` | record | Parameters embedded in a challenge (algorithm, nonce, salt, cost, keyPrefix, …) |
+| `Challenge` | record | Challenge object sent to the client: `parameters` + HMAC `signature` |
+| `Solution` | record | Solution found by the client: `counter`, `derivedKey`, `time` |
+| `Payload` | record | Full client submission: `challenge` + `solution` |
+| `VerifySolutionResult` | record | Verification outcome: `verified`, `expired`, `invalidSignature`, `invalidSolution`, `time` |
+| `ServerSignaturePayload` | record | Raw Sentinel attestation payload |
+| `ServerSignatureVerification` | record | Sentinel verification result: `verified`, `verificationData` |
+| `ServerSignatureVerificationData` | record | Parsed Sentinel data: `score`, `classification`, `email`, `expire`, `fields`, … |
+| `KeyDerivationFunction` | functional interface | Pluggable KDF: `deriveKey(ChallengeParameters, byte[] salt, byte[] password)` |
+| `DeriveKeyResult` | record | Wraps the `derivedKey` byte array returned by a KDF |
+| `PasswordBuffer` | class | Combines nonce + counter into a reusable byte array for KDF iterations |
+
 ---
 
 ## v1 Usage (legacy)
