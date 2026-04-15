@@ -378,6 +378,45 @@ public class AltchaV2Test {
         assertTrue(result.verified());
     }
 
+    @Test
+    public void testParsePayloadWithNullOptionalParams() throws Exception {
+        // Payload with optional fields as null
+        var algorithm    = "PBKDF2/SHA-256";
+        var nonce        = "35e76d0bf62dbacfb6e571185f6e1ce1";
+        var salt         = "b91ec8659c07572037329ef67ce1c0a5";
+        var cost         = 5000;
+        var keyLength    = 32;
+        var keyPrefix    = "048ab54265fd06ff21089afead7e73ff";
+        var keySignature = "null"; // optional — null
+        var memoryCost   = "null"; // optional — null
+        var parallelism  = "null"; // optional — null
+        var expiresAt    = "null"; // optional — null
+        var data         = "null"; // optional — null
+        var signature    = "null"; // optional - null
+        var counter      = 5000;
+        var derivedKey   = "048ab54265fd06ff21089afead7e73ffa7afe5cc448ac51b92bf66b86f6e350e";
+        var time         = "null"; // optional — null
+
+        var json = String.format(
+                "{\"challenge\":{\"parameters\":{\"algorithm\":\"%s\",\"nonce\":\"%s\"," +
+                "\"salt\":\"%s\",\"cost\":%d,\"keyLength\":%d,\"keyPrefix\":\"%s\"," +
+                "\"keySignature\":%s,\"memoryCost\":%s,\"parallelism\":%s," +
+                "\"expiresAt\":%s,\"data\":%s},\"signature\":\"%s\"}," +
+                "\"solution\":{\"counter\":%d,\"derivedKey\":\"%s\",\"time\":%s}}",
+                algorithm, nonce, salt, cost, keyLength, keyPrefix,
+                keySignature, memoryCost, parallelism, expiresAt, data, signature,
+                counter, derivedKey, time);
+        var base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+
+        var payload = Altcha.parsePayload(base64);
+        assertNull(payload.challenge().parameters().keySignature());
+        assertNull(payload.challenge().parameters().memoryCost());
+        assertNull(payload.challenge().parameters().parallelism());
+        assertNull(payload.challenge().parameters().expiresAt());
+        assertNull(payload.challenge().parameters().data());
+        assertNull(payload.solution().time());
+    }
+
     // -------------------------------------------------------------------------
     // Fields hash
     // -------------------------------------------------------------------------

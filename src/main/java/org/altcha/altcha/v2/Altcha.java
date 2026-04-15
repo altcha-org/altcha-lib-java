@@ -569,17 +569,17 @@ public final class Altcha {
                 paramsObj.getInt("keyLength"),
                 paramsObj.getString("keyPrefix"),
                 paramsObj.optString("keySignature", null),
-                paramsObj.has("memoryCost") ? paramsObj.getInt("memoryCost") : null,
-                paramsObj.has("parallelism") ? paramsObj.getInt("parallelism") : null,
-                paramsObj.has("expiresAt")   ? paramsObj.getLong("expiresAt")  : null,
-                paramsObj.has("data")        ? parseDataMap(paramsObj.getJSONObject("data")) : null);
+                paramsObj.has("memoryCost") && !paramsObj.isNull("memoryCost") ? paramsObj.getInt("memoryCost") : null,
+                paramsObj.has("parallelism") && !paramsObj.isNull("parallelism") ? paramsObj.getInt("parallelism") : null,
+                paramsObj.has("expiresAt")   && !paramsObj.isNull("expiresAt")   ? paramsObj.getLong("expiresAt")  : null,
+                paramsObj.has("data")        && !paramsObj.isNull("data")        ? parseDataMap(paramsObj.getJSONObject("data")) : null);
 
         var challenge = new Challenge(params,
                 challengeObj.optString("signature", null));
         var solution  = new Solution(
                 solutionObj.getInt("counter"),
                 solutionObj.getString("derivedKey"),
-                solutionObj.has("time") ? solutionObj.getLong("time") : null);
+                solutionObj.has("time") && !solutionObj.isNull("time") ? solutionObj.getLong("time") : null);
 
         return new Payload(challenge, solution);
     }
