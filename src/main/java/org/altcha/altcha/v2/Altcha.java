@@ -851,21 +851,11 @@ public final class Altcha {
 
     static byte[] hexToBytes(String hex) {
         if (hex.length() % 2 != 0) throw new IllegalArgumentException("Hex string must have even length: " + hex);
-        var bytes = new byte[hex.length() / 2];
-        for (var i = 0; i < bytes.length; i++) {
-            bytes[i] = (byte) Integer.parseInt(hex, i * 2, i * 2 + 2, 16);
-        }
-        return bytes;
+        return HexFormat.of().parseHex(hex);
     }
 
     public static String bytesToHex(byte[] bytes) {
-        var sb = new StringBuilder(2 * bytes.length);
-        for (var b : bytes) {
-            var hex = Integer.toHexString(0xff & b);
-            if (hex.length() == 1) sb.append('0');
-            sb.append(hex);
-        }
-        return sb.toString();
+        return HexFormat.of().formatHex(bytes);
     }
 
     private static long elapsed(long t0) {
