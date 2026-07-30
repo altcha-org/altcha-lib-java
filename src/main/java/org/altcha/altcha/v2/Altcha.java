@@ -524,7 +524,9 @@ public final class Altcha {
         var pw       = new PasswordBuffer(nonceBuf);
         var result   = kdfFn.deriveKey(params, saltBuf, pw.setCounter(solution.counter()));
         var rederived = bytesToHex(result.derivedKey());
-        var valid     = constantTimeEqual(rederived, solution.derivedKey());
+        var keyMatches    = constantTimeEqual(rederived, solution.derivedKey());
+        var prefixMatches = rederived.startsWith(params.keyPrefix());
+        var valid         = keyMatches && prefixMatches;
         return new VerifySolutionResult(valid, false, false, !valid, elapsed(t0));
     }
 

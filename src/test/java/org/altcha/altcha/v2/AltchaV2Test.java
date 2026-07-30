@@ -322,6 +322,41 @@ public class AltchaV2Test {
     }
 
     @Test
+    public void testVerifySolutionSlowPathRejectsWrongKeyPrefix() throws Exception {
+        // Regression test: the slow (re-derive) path must reject a solution whose
+        // derived key does not satisfy the signed keyPrefix, even when the derived
+        // key itself matches what re-deriving with the submitted counter produces.
+        // Without this check an attacker could submit counter=0 with its real
+        // (unbruteforced) derived key and bypass the proof-of-work entirely.
+        var opts = new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(0)
+                .hmacSignatureSecret(HMAC_SECRET);
+        var challenge = Altcha.createChallenge(opts);
+        var kdf       = Altcha.kdf("SHA-256");
+        // counter=0 trivially satisfies its own (matching) keyPrefix here.
+        var solution  = Altcha.solveChallenge(challenge, kdf, 0, 1);
+        assertEquals(0, solution.counter());
+
+        // Tamper the (still validly-signed) challenge so the required prefix no
+        // longer matches the derived key the attacker already has in hand.
+        var realPrefix    = challenge.parameters().keyPrefix();
+        var invertedFirst = (~Integer.parseInt(realPrefix.substring(0, 2), 16)) & 0xff;
+        var wrongPrefix    = String.format("%02x", invertedFirst) + realPrefix.substring(2);
+        var tamperedParams = challenge.parameters().withKeyPrefix(wrongPrefix);
+        var tamperedChallenge = Altcha.signChallenge(
+                Altcha.DEFAULT_HMAC_ALGORITHM, tamperedParams, null, HMAC_SECRET, null);
+
+        var result = Altcha.verifySolution(tamperedChallenge, solution, HMAC_SECRET, kdf);
+
+        assertFalse(result.verified());
+        assertFalse(result.expired());
+        assertFalse(result.invalidSignature());
+        assertTrue(result.invalidSolution());
+    }
+
+    @Test
     public void testVerifySolutionWithKeySignature() throws Exception {
         // Deterministic mode: server knows the counter in advance, sets keySignature.
         var opts = new Altcha.CreateChallengeOptions()
