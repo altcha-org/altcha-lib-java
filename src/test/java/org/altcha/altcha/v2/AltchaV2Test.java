@@ -1,6 +1,7 @@
 package org.altcha.altcha.v2;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
@@ -9,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -319,6 +321,39 @@ public class AltchaV2Test {
 
         assertEquals(expectedCounter, solution.counter());
         assertTrue(solution.derivedKey().startsWith(expectedKey));
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf).verified());
+    }
+
+    @Test
+    public void testShaKdfKeyLengthBeyondDigestIsTruncatedLikeJs() throws Exception {
+        var params = new Altcha.ChallengeParameters(
+                "SHA-256", "n", "s", 3, 64, "00", null, null, null, null, null);
+        var salt     = HexFormat.of().parseHex("11223344556677889900aabbccddeeff");
+        var password = HexFormat.of().parseHex("aabbccdd00112233aabbccdd0011223300000005");
+
+        var derived = Altcha.sha().deriveKey(params, salt, password).derivedKey();
+
+        // altcha-lib sha.deriveKey: derivedKey.subarray(0, 64) of a 32-byte digest
+        assertEquals("544847ebea6cd9d17f15875b59a7040f84d4d149ec3771f2c5bd6c9b95fd4c9e",
+                HexFormat.of().formatHex(derived));
+    }
+
+    @Test
+    @Timeout(10)
+    public void testKeyPrefixLengthBeyondKeyLengthIsTruncatedLikeJs() throws Exception {
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(5)
+                .keyLength(32)
+                .keyPrefixLength(40)
+                .hmacSignatureSecret(HMAC_SECRET));
+        var kdf       = Altcha.kdf("SHA-256");
+
+        assertEquals(64, challenge.parameters().keyPrefix().length());  // whole key, no zero padding
+        var solution = Altcha.solveChallenge(challenge, kdf);
+        assertEquals(5, solution.counter());
+        assertEquals(challenge.parameters().keyPrefix(), solution.derivedKey());
         assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf).verified());
     }
 

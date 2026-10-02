@@ -348,7 +348,7 @@ public final class Altcha {
                 else          md.update(derived);
                 derived = md.digest();
             }
-            return new DeriveKeyResult(Arrays.copyOf(derived, params.keyLength()));
+            return new DeriveKeyResult(jsSlice(derived, params.keyLength()));
         };
     }
 
@@ -395,7 +395,7 @@ public final class Altcha {
             var pw       = new PasswordBuffer(nonceBuf);
             var result   = kdfFn.deriveKey(params, saltBuf, pw.setCounter(options.counter));
             derivedKey   = result.derivedKey();
-            params       = params.withKeyPrefix(bytesToHex(Arrays.copyOf(derivedKey, prefixLength)));
+            params       = params.withKeyPrefix(bytesToHex(jsSlice(derivedKey, prefixLength)));
         }
 
         if (!isSet(options.hmacSignatureSecret)) {
@@ -1015,6 +1015,15 @@ public final class Altcha {
     /** JS key-prefix check; {@code keyPrefixBuf} is {@link #keyPrefixBytes(String) keyPrefixBytes(keyPrefix)}. */
     private static boolean keyPrefixMatches(byte[] derivedKey, String keyPrefix, byte[] keyPrefixBuf) {
         return keyPrefixBuf != null ? startsWith(derivedKey, keyPrefixBuf) : hexStartsWith(derivedKey, keyPrefix);
+    }
+
+    /**
+     * JS {@code bytes.slice(0, end)}: truncates to the available bytes (never pads);
+     * a negative {@code end} counts from the end.
+     */
+    static byte[] jsSlice(byte[] bytes, int end) {
+        var length = end < 0 ? Math.max(bytes.length + end, 0) : Math.min(end, bytes.length);
+        return length == bytes.length ? bytes : Arrays.copyOf(bytes, length);
     }
 
     static boolean startsWith(byte[] buffer, byte[] prefix) {
