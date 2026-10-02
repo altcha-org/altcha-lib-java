@@ -63,7 +63,7 @@ public final class Altcha {
             String keySignature,   // nullable – set in deterministic mode
             Integer memoryCost,    // nullable – Argon2id / Scrypt
             Integer parallelism,   // nullable – Argon2id / Scrypt
-            Long expiresAt,        // nullable – unix timestamp (seconds)
+            Number expiresAt,      // nullable – unix timestamp (seconds); Long, or Double if fractional (as in JS)
             Map<String, Object> data // nullable – arbitrary metadata
     ) {
         public ChallengeParameters withKeyPrefix(String newKeyPrefix) {
@@ -313,7 +313,7 @@ public final class Altcha {
         public int cost;
         public Map<String, Object> data;
         public KeyDerivationFunction deriveKey;
-        public Long expiresAt;
+        public Number expiresAt;
         public String hmacAlgorithm = DEFAULT_HMAC_ALGORITHM;
         public String hmacKeySignatureSecret;
         public String hmacSignatureSecret;
@@ -329,7 +329,7 @@ public final class Altcha {
         public CreateChallengeOptions cost(int v)                          { cost = v; return this; }
         public CreateChallengeOptions data(Map<String, Object> v)          { data = v; return this; }
         public CreateChallengeOptions deriveKey(KeyDerivationFunction v)   { deriveKey = v; return this; }
-        public CreateChallengeOptions expiresAt(Long v)                    { expiresAt = v; return this; }
+        public CreateChallengeOptions expiresAt(Number v)                  { expiresAt = v; return this; }
         public CreateChallengeOptions expiresInSeconds(long seconds)       { expiresAt = System.currentTimeMillis() / 1000 + seconds; return this; }
         public CreateChallengeOptions hmacAlgorithm(String v)              { hmacAlgorithm = v; return this; }
         public CreateChallengeOptions hmacKeySignatureSecret(String v)     { hmacKeySignatureSecret = v; return this; }
@@ -567,8 +567,8 @@ public final class Altcha {
         var params = challenge.parameters();
 
         // 1. Expiry (against fractional seconds, like JS `expiresAt && expiresAt < Date.now() / 1000`; 0 = no expiry)
-        var expiresAt = params.expiresAt();
-        if (expiresAt != null && expiresAt != 0 && expiresAt < System.currentTimeMillis() / 1000.0) {
+        var expiresAt = params.expiresAt() != null ? params.expiresAt().doubleValue() : 0;
+        if (expiresAt != 0 && expiresAt < System.currentTimeMillis() / 1000.0) {
             return new VerifySolutionResult(false, true, null, null, elapsed(t0));
         }
 
@@ -682,7 +682,7 @@ public final class Altcha {
                 paramsObj.optString("keySignature", null),
                 paramsObj.has("memoryCost") && !paramsObj.isNull("memoryCost") ? paramsObj.getInt("memoryCost") : null,
                 paramsObj.has("parallelism") && !paramsObj.isNull("parallelism") ? paramsObj.getInt("parallelism") : null,
-                paramsObj.has("expiresAt")   && !paramsObj.isNull("expiresAt")   ? paramsObj.getLong("expiresAt")  : null,
+                paramsMap.get("expiresAt") != null ? jsonNumber(paramsMap.get("expiresAt"), "expiresAt") : null,
                 paramsMap.get("data") != null ? asObject(paramsMap.get("data"), "data") : null);
 
         var challenge = new Challenge(params,
@@ -1212,6 +1212,13 @@ public final class Altcha {
     private static Map<String, Object> asObject(Object value, String name) {
         if (!(value instanceof Map<?, ?>)) throw new JSONException("\"" + name + "\" is not a JSON object");
         return (Map<String, Object>) value;
+    }
+
+    /** A parsed JSON number as JS holds it: {@code Long} for integer literals, otherwise the nearest {@code Double}. */
+    private static Number jsonNumber(Object value, String name) {
+        if (value instanceof Integer || value instanceof Long) return ((Number) value).longValue();
+        if (value instanceof Number n) return n.doubleValue();
+        throw new JSONException("\"" + name + "\" is not a number");
     }
 
     private static Map<String, String> parseQueryParams(String raw) throws Exception {

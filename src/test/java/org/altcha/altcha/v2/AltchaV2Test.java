@@ -551,6 +551,23 @@ public class AltchaV2Test {
         assertFalse(result.expired());
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            // altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1, hmacSignatureSecret: HMAC_SECRET,
+            // expiresAt}), then solveChallenge. JS result: 4102444800.5 → verified; 1.5 → expired.
+            "4102444800.5, false, eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwiZXhwaXJlc0F0Ijo0MTAyNDQ0ODAwLjUsImtleUxlbmd0aCI6MzIsImtleVByZWZpeCI6IjAwIiwibm9uY2UiOiI4MjA1NjJmYzYwYTY0NWZjMzZiNjE5NDI5YWM3N2E0OCIsInNhbHQiOiI1ZTA0M2E1ZjJlZGJjMDAxZWUxNWI5YmEyMjYzYWIyYiJ9LCJzaWduYXR1cmUiOiI3YmQ4MDZhNTdmNzg5YTRkNjNjOWIxODNkNTM2MTFiYWFjZGU5MDJkMjliYjdlOGQ5ZTFmOThhNzg5NDJjNjY2In0sInNvbHV0aW9uIjp7ImNvdW50ZXIiOjIzMCwiZGVyaXZlZEtleSI6IjAwYjIxZmMyNmM0YmEwNjEzZWQyMzI3Y2RlOTAzOGJiNTIxMjM5MmYzM2NjNmIyMTgzYzQyZGIzM2RiODE0NzAiLCJ0aW1lIjowLjF9fQ==",
+            "1.5,          true,  eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwiZXhwaXJlc0F0IjoxLjUsImtleUxlbmd0aCI6MzIsImtleVByZWZpeCI6IjAwIiwibm9uY2UiOiJmNThlYmFlMTUyZDM3ZGNmZWZkMWMyYWM0NDhjNzBjMSIsInNhbHQiOiIxODM2MDgwOGVhZDdmMjE3MDQ2YjIyMzEyNzk4NDJhMCJ9LCJzaWduYXR1cmUiOiIzZTJhOTNiNmEzYjhlNDQwZmM3Njk0NGU2MTM2YzZmOGEzZDJjNTE1YzM2MDg1NDliZTRjNDkzNzlmOWNmMzgzIn0sInNvbHV0aW9uIjp7ImNvdW50ZXIiOjU5MCwiZGVyaXZlZEtleSI6IjAwNDQ4ZWI4MTY3MWY3NmYwNzRiNzZjZjc2MGVlYjI1ZGZkNTBlM2QyOTUxZDYxMDBmNjRlY2EwOTI4YzkzZmQiLCJ0aW1lIjoxLjR9fQ==",
+    })
+    public void testVerifyJsCreatedChallengeWithFractionalExpiresAt(double expiresAt, boolean expired,
+            String payload) throws Exception {
+        assertEquals(expiresAt, Altcha.parsePayload(payload).challenge().parameters().expiresAt());
+
+        var result = Altcha.verifySolution(payload, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertEquals(expired, result.expired());
+        assertEquals(!expired, result.verified());   // signature over the fractional value must match
+    }
+
     @Test
     public void testVerifyJsCreatedChallengeWithCounterBeyondInt32() throws Exception {
         // Created with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1, keyPrefix: '0',
