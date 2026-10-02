@@ -364,7 +364,7 @@ public final class Altcha {
      * {@code keyPrefix} (deterministic mode). Otherwise a static prefix (default
      * {@code "00"}) is used and the client must brute-force the counter.</p>
      *
-     * <p>If {@link CreateChallengeOptions#hmacSignatureSecret} is set, the
+     * <p>If {@link CreateChallengeOptions#hmacSignatureSecret} is set (non-empty), the
      * challenge parameters are HMAC-signed and the returned {@link Challenge}
      * includes a {@code signature}.</p>
      */
@@ -398,7 +398,7 @@ public final class Altcha {
             params       = params.withKeyPrefix(bytesToHex(Arrays.copyOf(derivedKey, prefixLength)));
         }
 
-        if (options.hmacSignatureSecret == null) {
+        if (!isSet(options.hmacSignatureSecret)) {
             return new Challenge(params, null);
         }
 
@@ -410,7 +410,7 @@ public final class Altcha {
     public static Challenge signChallenge(String hmacAlgorithm, ChallengeParameters params,
             byte[] derivedKey, String hmacSignatureSecret, String hmacKeySignatureSecret)
             throws Exception {
-        if (derivedKey != null && hmacKeySignatureSecret != null) {
+        if (derivedKey != null && isSet(hmacKeySignatureSecret)) {
             params = params.withKeySignature(hmacHex(hmacAlgorithm, derivedKey, hmacKeySignatureSecret));
         }
         var signature = hmacHex(hmacAlgorithm,
@@ -492,15 +492,16 @@ public final class Altcha {
             String hmacAlgorithm,
             KeyDerivationFunction kdfFn) throws Exception {
 
-        if (hmacSignatureSecret == null || hmacSignatureSecret.isBlank()) {
+        if (!isSet(hmacSignatureSecret)) {
             throw new IllegalArgumentException("hmacSignatureSecret is required for v2 verification");
         }
 
         var t0     = System.nanoTime();
         var params = challenge.parameters();
 
-        // 1. Expiry (against fractional seconds, like JS `expiresAt < Date.now() / 1000`)
-        if (params.expiresAt() != null && params.expiresAt() < System.currentTimeMillis() / 1000.0) {
+        // 1. Expiry (against fractional seconds, like JS `expiresAt && expiresAt < Date.now() / 1000`; 0 = no expiry)
+        var expiresAt = params.expiresAt();
+        if (expiresAt != null && expiresAt != 0 && expiresAt < System.currentTimeMillis() / 1000.0) {
             return new VerifySolutionResult(false, true, null, null, elapsed(t0));
         }
 
@@ -519,7 +520,7 @@ public final class Altcha {
         }
 
         // 4a. Fast path: key signature
-        if (params.keySignature() != null && hmacKeySignatureSecret != null) {
+        if (isSet(params.keySignature()) && isSet(hmacKeySignatureSecret)) {
             // Client-controlled: malformed hex is an invalid solution, not an exception.
             if (!isHex(solution.derivedKey())) {
                 return new VerifySolutionResult(false, false, false, true, elapsed(t0));
@@ -1016,6 +1017,11 @@ public final class Altcha {
     static byte[] hexToBytes(String hex) {
         if (hex.length() % 2 != 0) throw new IllegalArgumentException("Hex string must have even length: " + hex);
         return HexFormat.of().parseHex(hex);
+    }
+
+    /** JS truthiness for optional strings: {@code null} and {@code ""} both mean unset. */
+    private static boolean isSet(String s) {
+        return s != null && !s.isEmpty();
     }
 
     /** Returns {@code true} if {@code s} is non-null, even-length and contains only ASCII hex digits. */

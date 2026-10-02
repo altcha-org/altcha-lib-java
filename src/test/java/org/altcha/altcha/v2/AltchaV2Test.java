@@ -386,6 +386,35 @@ public class AltchaV2Test {
     }
 
     @Test
+    public void testVerifySolutionExpiresAtZeroMeansNoExpiry() throws Exception {
+        // JS: `expiresAt && …` — 0 is falsy, so the expiry check is skipped.
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .expiresAt(0L)
+                .hmacSignatureSecret(HMAC_SECRET));
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf);
+
+        assertTrue(result.verified());
+        assertFalse(result.expired());
+    }
+
+    @Test
+    public void testVerifyJsCreatedChallengeWithExpiresAtZero() throws Exception {
+        // Created and solved with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1,
+        // hmacSignatureSecret: HMAC_SECRET, expiresAt: 0}), then solveChallenge. JS verifies it.
+        var payload = "eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwiZXhwaXJlc0F0IjowLCJrZXlMZW5ndGgiOjMyLCJrZXlQcmVmaXgiOiIwMCIsIm5vbmNlIjoiYWRmNzc3ZGRhZjUzYTkwYjAwOGFlNTE4OWQ1ZjM0Y2MiLCJzYWx0IjoiMmY2ZTg0NzMzZWJhYmU1ODMxYWRkMDRmM2VjOTEwMzcifSwic2lnbmF0dXJlIjoiY2YxMTgzMDg3NzBiZWM5ZWIzZTZlNmVlNGM1Zjk3OWU2NjFkYzcwNGFjNjY4YjA2ZjA2MTY5ZjVkMmMxZDliYyJ9LCJzb2x1dGlvbiI6eyJjb3VudGVyIjoxMTI1LCJkZXJpdmVkS2V5IjoiMDBjMmEzOTc5MGIyYzdjOGUzODY5NTkyMWE1MmIzOWM3YzBlOGJhMzVhODliYWVlYWIxZjBlNWFiOTMzNmI4OSIsInRpbWUiOjAuOH19";
+
+        var result = Altcha.verifySolution(payload, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertTrue(result.verified());
+        assertFalse(result.expired());
+    }
+
+    @Test
     public void testVerifySolutionNoSignature() throws Exception {
         var opts = new Altcha.CreateChallengeOptions()
                 .algorithm("SHA-256")
@@ -594,6 +623,59 @@ public class AltchaV2Test {
         var upper     = new Altcha.Solution(solution.counter(), solution.derivedKey().toUpperCase(), 0L);
 
         var result = Altcha.verifySolution(challenge, upper, HMAC_SECRET, "key-signing-secret", null);
+
+        assertTrue(result.verified());
+    }
+
+    @Test
+    public void testCreateChallengeEmptySignatureSecretIsUnsigned() throws Exception {
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .hmacSignatureSecret(""));
+
+        assertNull(challenge.signature());
+    }
+
+    @Test
+    public void testEmptyKeySignatureSecretSkipsKeySignature() throws Exception {
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(5)
+                .hmacSignatureSecret(HMAC_SECRET)
+                .hmacKeySignatureSecret(""));
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        assertNotNull(challenge.signature());
+        assertNull(challenge.parameters().keySignature());
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, "", kdf).verified());
+    }
+
+    @Test
+    public void testVerifySolutionEmptyKeySecretFallsBackToRederive() throws Exception {
+        var challenge = createKeySignatureChallenge();
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, "", kdf);
+
+        assertTrue(result.verified());
+    }
+
+    @Test
+    public void testVerifySolutionEmptyKeySignatureFallsBackToRederive() throws Exception {
+        var kdf       = Altcha.kdf("SHA-256");
+        var unsigned  = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(5));
+        var challenge = Altcha.signChallenge(Altcha.DEFAULT_HMAC_ALGORITHM,
+                unsigned.parameters().withKeySignature(""), null, HMAC_SECRET, null);
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, "key-signing-secret", kdf);
 
         assertTrue(result.verified());
     }
