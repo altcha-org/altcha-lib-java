@@ -23,14 +23,14 @@ Maven:
 <dependency>
     <groupId>org.altcha</groupId>
     <artifactId>altcha</artifactId>
-    <version>2.0.3</version>
+    <version>2.1.0</version>
 </dependency>
 ```
 
 Gradle:
 
 ```
-implementation 'org.altcha:altcha:2.0.3'
+implementation 'org.altcha:altcha:2.1.0'
 ```
 
 `org.json` must be present at runtime (it is a `provided` dependency):
