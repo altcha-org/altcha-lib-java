@@ -2,12 +2,18 @@ package org.altcha.altcha.v2;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import org.json.JSONArray;
+import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.JSONTokener;
 
 /**
  * ALTCHA v2 – key-derivation-based proof-of-work.
@@ -578,11 +584,17 @@ public final class Altcha {
      * </p>
      */
     public static Payload parsePayload(String base64Payload) throws Exception {
-        var json = new JSONObject(
+        // Parsed with insertion order preserved: canonical JSON keeps the key order of objects inside arrays.
+        var json = new JSONTokener(
                 new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        var challengeObj  = json.getJSONObject("challenge");
-        var paramsObj     = challengeObj.getJSONObject("parameters");
-        var solutionObj   = json.getJSONObject("solution");
+        var root = parseOrdered(json);
+        if (json.nextClean() != 0) throw json.syntaxError("Unexpected trailing content");
+        var rootMap       = asObject(root, "payload");
+        var challengeMap  = asObject(rootMap.get("challenge"), "challenge");
+        var paramsMap     = asObject(challengeMap.get("parameters"), "parameters");
+        var challengeObj  = new JSONObject(challengeMap);
+        var paramsObj     = new JSONObject(paramsMap);
+        var solutionObj   = new JSONObject(asObject(rootMap.get("solution"), "solution"));
 
         var params = new ChallengeParameters(
                 paramsObj.getString("algorithm"),
@@ -595,7 +607,7 @@ public final class Altcha {
                 paramsObj.has("memoryCost") && !paramsObj.isNull("memoryCost") ? paramsObj.getInt("memoryCost") : null,
                 paramsObj.has("parallelism") && !paramsObj.isNull("parallelism") ? paramsObj.getInt("parallelism") : null,
                 paramsObj.has("expiresAt")   && !paramsObj.isNull("expiresAt")   ? paramsObj.getLong("expiresAt")  : null,
-                paramsObj.has("data")        && !paramsObj.isNull("data")        ? parseDataMap(paramsObj.getJSONObject("data")) : null);
+                paramsMap.get("data") != null ? asObject(paramsMap.get("data"), "data") : null);
 
         var challenge = new Challenge(params,
                 challengeObj.optString("signature", null));
@@ -728,8 +740,9 @@ public final class Altcha {
     /**
      * Produces the canonical JSON representation of {@link ChallengeParameters}.
      *
-     * <p>Keys are sorted lexicographically (matching JS {@code Object.keys(obj).sort()}).
-     * Null fields are omitted. This format is used for HMAC signing.</p>
+     * <p>Matches JS {@code JSON.stringify(sortKeys(parameters))}: keys sorted
+     * lexicographically, numbers formatted as in JS. Null fields are omitted.
+     * This format is used for HMAC signing.</p>
      */
     static String canonicalJson(ChallengeParameters p) {
         var fields = new TreeMap<String, Object>();
@@ -747,27 +760,147 @@ public final class Altcha {
         return encodeValue(fields);
     }
 
-    /** Recursively encodes a value as canonical JSON. Maps have keys sorted lexicographically. */
-    @SuppressWarnings("unchecked")
+    /**
+     * Encodes a value as canonical JSON, identical to JS {@code JSON.stringify(sortKeys(value))}:
+     * object keys are sorted recursively except inside arrays (which {@code sortKeys} does not
+     * descend into), objects are emitted in JS property order, and numbers and strings use
+     * {@code JSON.stringify} formatting.
+     */
     private static String encodeValue(Object value) {
-        if (value instanceof String s) return jsonString(s);
-        if (value instanceof Map<?, ?> m) {
-            var sb = new StringBuilder("{");
-            var first = true;
-            for (var key : new TreeSet<>(((Map<String, ?>) m).keySet())) {
-                if (!first) sb.append(',');
-                first = false;
-                sb.append(jsonString(key)).append(':').append(encodeValue(m.get(key)));
-            }
-            return sb.append('}').toString();
-        }
-        // Number, Boolean, null
-        return String.valueOf(value);
+        var sb = new StringBuilder();
+        encodeValue(sb, value, true);
+        return sb.toString();
     }
 
-    /** Returns a properly JSON-escaped quoted string. */
+    private static void encodeValue(StringBuilder sb, Object value, boolean sortKeys) {
+        if (value == null || JSONObject.NULL.equals(value)) { sb.append("null"); return; }
+        if (value instanceof String s)  { appendJsonString(sb, s); return; }
+        if (value instanceof Number n)  { sb.append(jsNumber(n)); return; }
+        if (value instanceof Boolean b) { sb.append(b.booleanValue()); return; }
+        if (value instanceof JSONObject o) { encodeValue(sb, o.toMap(), sortKeys); return; }
+        if (value instanceof JSONArray a)  { encodeValue(sb, a.toList(), sortKeys); return; }
+        if (value instanceof Map<?, ?> m) {
+            sb.append('{');
+            var first = true;
+            for (var entry : jsPropertyOrder(m, sortKeys)) {
+                if (!first) sb.append(',');
+                first = false;
+                appendJsonString(sb, entry.getKey());
+                sb.append(':');
+                encodeValue(sb, entry.getValue(), sortKeys);
+            }
+            sb.append('}');
+            return;
+        }
+        if (value instanceof Iterable<?> it) {
+            sb.append('[');
+            var first = true;
+            for (var item : it) {
+                if (!first) sb.append(',');
+                first = false;
+                encodeValue(sb, item, false);
+            }
+            sb.append(']');
+            return;
+        }
+        if (value instanceof Object[] arr) { encodeValue(sb, Arrays.asList(arr), sortKeys); return; }
+        throw new IllegalArgumentException("Unsupported JSON value type: " + value.getClass().getName());
+    }
+
+    /**
+     * Orders map entries as a JS object built from them would enumerate: array-index keys
+     * ({@code "0"}..{@code "4294967294"}) first in ascending numeric order, then the remaining
+     * keys sorted (if {@code sortKeys}, by UTF-16 code units like {@code Array.prototype.sort})
+     * or in the map's iteration order.
+     */
+    private static List<Map.Entry<String, Object>> jsPropertyOrder(Map<?, ?> map, boolean sortKeys) {
+        var entries = new ArrayList<Map.Entry<String, Object>>(map.size());
+        for (var e : map.entrySet()) {
+            entries.add(new AbstractMap.SimpleImmutableEntry<>(String.valueOf(e.getKey()), e.getValue()));
+        }
+        if (sortKeys) entries.sort(Map.Entry.comparingByKey());
+        // Stable sort: moves array-index keys to the front, keeps the order of the rest.
+        entries.sort((a, b) -> {
+            var ia = arrayIndex(a.getKey());
+            var ib = arrayIndex(b.getKey());
+            if (ia < 0) return ib < 0 ? 0 : 1;
+            return ib < 0 ? -1 : Long.compare(ia, ib);
+        });
+        return entries;
+    }
+
+    /** Returns the numeric value if {@code key} is a JS array index (canonical uint32 below 2^32 - 1), else -1. */
+    private static long arrayIndex(String key) {
+        var len = key.length();
+        if (len == 0 || len > 10 || (len > 1 && key.charAt(0) == '0')) return -1;
+        var value = 0L;
+        for (var i = 0; i < len; i++) {
+            var c = key.charAt(i);
+            if (c < '0' || c > '9') return -1;
+            value = value * 10 + (c - '0');
+        }
+        return value <= 0xFFFF_FFFEL ? value : -1;
+    }
+
+    private static final long MAX_SAFE_INTEGER = (1L << 53) - 1;
+
+    /**
+     * Formats a number like JS {@code JSON.stringify}. JS numbers are doubles, so every
+     * value is formatted as its nearest double; non-finite values become {@code null}.
+     */
+    static String jsNumber(Number n) {
+        if (n instanceof Integer || n instanceof Short || n instanceof Byte) return n.toString();
+        if (n instanceof Long l && l >= -MAX_SAFE_INTEGER && l <= MAX_SAFE_INTEGER) return l.toString();
+        return jsNumber(n.doubleValue());
+    }
+
+    /** ECMAScript {@code Number::toString(x)} (radix 10), with {@code null} for NaN/Infinity as in JSON. */
+    static String jsNumber(double d) {
+        if (!Double.isFinite(d)) return "null";
+        if (d == 0) return "0"; // also -0
+        if (d < 0) return "-" + jsNumber(-d);
+        if (d <= MAX_SAFE_INTEGER && d == Math.rint(d)) return Long.toString((long) d);
+
+        // Shortest digits k and exponent n with d = 0.digits × 10^n
+        var shortest = shortestDecimal(d);
+        var digits   = shortest.unscaledValue().toString();
+        var k        = digits.length();
+        var e        = k - shortest.scale();
+
+        if (k <= e && e <= 21) return digits + "0".repeat(e - k);
+        if (0 < e && e <= 21)  return digits.substring(0, e) + "." + digits.substring(e);
+        if (-6 < e && e <= 0)  return "0." + "0".repeat(-e) + digits;
+        var exp      = e - 1;
+        var mantissa = k == 1 ? digits : digits.charAt(0) + "." + digits.substring(1);
+        return mantissa + "e" + (exp < 0 ? "-" : "+") + Math.abs(exp);
+    }
+
+    /**
+     * Shortest decimal that rounds to {@code d} (positive, finite); among equally short
+     * candidates the one closest to {@code d}. Not using {@code Double.toString}: before
+     * JDK 19 it does not always return the shortest representation (JDK-4511638).
+     */
+    private static BigDecimal shortestDecimal(double d) {
+        var exact = new BigDecimal(d);
+        for (var precision = 1; ; precision++) {
+            var nearest = exact.round(new MathContext(precision, RoundingMode.HALF_EVEN));
+            if (nearest.doubleValue() == d) return nearest.stripTrailingZeros();
+            // At powers of two the rounding interval is asymmetric: the farther neighbour may still round-trip.
+            for (var mode : new RoundingMode[]{RoundingMode.FLOOR, RoundingMode.CEILING}) {
+                var candidate = exact.round(new MathContext(precision, mode));
+                if (candidate.doubleValue() == d) return candidate.stripTrailingZeros();
+            }
+        }
+    }
+
+    /** Returns a JSON-escaped quoted string, identical to JS {@code JSON.stringify}. */
     static String jsonString(String s) {
         var sb = new StringBuilder(s.length() + 2);
+        appendJsonString(sb, s);
+        return sb.toString();
+    }
+
+    private static void appendJsonString(StringBuilder sb, String s) {
         sb.append('"');
         for (var i = 0; i < s.length(); i++) {
             var c = s.charAt(i);
@@ -780,14 +913,22 @@ public final class Altcha {
                 case '\r' -> sb.append("\\r");
                 case '\t' -> sb.append("\\t");
                 default   -> {
-                    if (c < 0x20) sb.append(String.format("\\u%04x", (int) c));
-                    else          sb.append(c);
+                    if (Character.isHighSurrogate(c) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1))) {
+                        sb.append(c).append(s.charAt(++i));
+                    } else if (c < 0x20 || Character.isSurrogate(c)) {
+                        // Control characters and lone surrogates (well-formed JSON.stringify)
+                        sb.append("\\u").append(HEX_DIGITS[c >> 12]).append(HEX_DIGITS[(c >> 8) & 0xf])
+                          .append(HEX_DIGITS[(c >> 4) & 0xf]).append(HEX_DIGITS[c & 0xf]);
+                    } else {
+                        sb.append(c);
+                    }
                 }
             }
         }
         sb.append('"');
-        return sb.toString();
     }
+
+    private static final char[] HEX_DIGITS = "0123456789abcdef".toCharArray();
 
     // -------------------------------------------------------------------------
     // PBKDF2 – manual implementation for raw-byte compatibility with Node.js
@@ -905,14 +1046,47 @@ public final class Altcha {
         return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
     }
 
-    private static Map<String, Object> parseDataMap(JSONObject obj) {
-        var map = new LinkedHashMap<String, Object>();
-        for (var key : obj.keySet()) {
-            var val = obj.get(key);
-            if (JSONObject.NULL.equals(val)) map.put(key, null);
-            else map.put(key, val);
+    /**
+     * Parses a JSON value like JS {@code JSON.parse}: objects become insertion-ordered maps
+     * (a duplicate key keeps its first position and its last value), arrays become lists,
+     * {@code null} becomes Java {@code null}. Strings and numbers are parsed by org.json.
+     */
+    private static Object parseOrdered(JSONTokener x) {
+        var c = x.nextClean();
+        if (c == '{') {
+            var map = new LinkedHashMap<String, Object>();
+            if (x.nextClean() == '}') return map;
+            x.back();
+            while (true) {
+                if (x.nextClean() != '"') throw x.syntaxError("Expected a string key");
+                var key = x.nextString('"');
+                if (x.nextClean() != ':') throw x.syntaxError("Expected ':' after key");
+                map.put(key, parseOrdered(x));
+                c = x.nextClean();
+                if (c == '}') return map;
+                if (c != ',') throw x.syntaxError("Expected ',' or '}'");
+            }
         }
-        return map;
+        if (c == '[') {
+            var list = new ArrayList<Object>();
+            if (x.nextClean() == ']') return list;
+            x.back();
+            while (true) {
+                list.add(parseOrdered(x));
+                c = x.nextClean();
+                if (c == ']') return list;
+                if (c != ',') throw x.syntaxError("Expected ',' or ']'");
+            }
+        }
+        x.back();
+        var value = x.nextValue();
+        return JSONObject.NULL.equals(value) ? null : value;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asObject(Object value, String name) {
+        if (!(value instanceof Map<?, ?>)) throw new JSONException("\"" + name + "\" is not a JSON object");
+        return (Map<String, Object>) value;
     }
 
     private static Map<String, String> parseQueryParams(String raw) throws Exception {

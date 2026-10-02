@@ -130,6 +130,8 @@ var options = new Altcha.CreateChallengeOptions()
         .data(Map.of("userId", "42", "action", "login"));
 ```
 
+`data` values must be JSON types: `String`, `Number`, `Boolean`, `null`, `Map` or `List`. Signing uses the same canonical JSON as the JavaScript library (`JSON.stringify` with recursively sorted keys), so signatures interoperate with it and survive the widget's JSON round trip: numbers are formatted like JavaScript (`1.0` → `1`, `1e21` → `1e+21`), and objects inside a `List` are not sorted but keep their iteration order — use a `LinkedHashMap` for those.
+
 ### Deterministic mode (key signature)
 
 In deterministic mode the server pre-computes the expected key prefix from a known counter. This allows fast verification without re-running the KDF.

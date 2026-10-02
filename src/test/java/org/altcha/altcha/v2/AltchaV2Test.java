@@ -8,7 +8,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -79,6 +81,85 @@ public class AltchaV2Test {
         assertEquals("\"hello\\\"world\"", Altcha.jsonString("hello\"world"));
         assertEquals("\"line\\nbreak\"",   Altcha.jsonString("line\nbreak"));
         assertEquals("\"tab\\there\"",     Altcha.jsonString("tab\there"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // Java double literal, JSON.stringify output (node)
+            "1.0,                     1",
+            "1.5,                     1.5",
+            "-0.0,                    0",
+            "1e20,                    100000000000000000000",
+            "1e21,                    1e+21",
+            "1e-6,                    0.000001",
+            "1e-7,                    1e-7",
+            "-1.234e-6,               -0.000001234",
+            "0.30000000000000004,     0.30000000000000004",
+            "8.41e21,                 8.41e+21",       // Double.toString before JDK 19: 8.409999999999999E21
+            "5e-324,                  5e-324",
+            "1.7976931348623157e308,  1.7976931348623157e+308",
+            "NaN,                     null",
+            "Infinity,                null",
+    })
+    public void testJsNumberMatchesJsonStringify(String javaValue, String expected) {
+        assertEquals(expected, Altcha.jsNumber(Double.parseDouble(javaValue)));
+    }
+
+    @Test
+    public void testJsNumberUnsafeIntegersRoundLikeJs() {
+        // JS numbers are doubles: 2^53 + 1 is not representable and serialises as 2^53.
+        assertEquals("9007199254740991", Altcha.jsNumber(9007199254740991L));
+        assertEquals("9007199254740992", Altcha.jsNumber(9007199254740993L));
+        assertEquals("12345678901234567000", Altcha.jsNumber(new java.math.BigInteger("12345678901234567890")));
+    }
+
+    @Test
+    public void testCanonicalJsonDataNumbersAndArrays() {
+        var data = new LinkedHashMap<String, Object>();
+        data.put("d", 1.0);
+        data.put("big", 1e21);
+        data.put("list", java.util.List.of(2.5, "x", true));
+        var params = new Altcha.ChallengeParameters(
+                "SHA-256", "n", "s", 100, 32, "00",
+                null, null, null, null, data);
+        assertTrue(Altcha.canonicalJson(params).contains(
+                "\"data\":{\"big\":1e+21,\"d\":1,\"list\":[2.5,\"x\",true]}"));
+    }
+
+    private static String canonicalData(Map<String, Object> data) {
+        var json = Altcha.canonicalJson(new Altcha.ChallengeParameters(
+                "SHA-256", "n", "s", 100, 32, "00", null, null, null, null, data));
+        return json.substring(json.indexOf("\"data\":") + 7, json.indexOf(",\"keyLength\""));
+    }
+
+    @Test
+    public void testCanonicalJsonArrayIndexKeysFirstLikeJs() {
+        var data = new HashMap<String, Object>();
+        for (var key : new String[]{"b", "10", "2", "a", "01", "-1", "1.5", "4294967294", "4294967295", "B"}) {
+            data.put(key, 1);
+        }
+        // Expected: altcha-lib canonicalJSON (array indices < 2^32 - 1 first, numerically; then sorted)
+        assertEquals("{\"2\":1,\"10\":1,\"4294967294\":1,\"-1\":1,\"01\":1,\"1.5\":1,\"4294967295\":1,"
+                + "\"B\":1,\"a\":1,\"b\":1}", canonicalData(data));
+    }
+
+    @Test
+    public void testCanonicalJsonObjectsInsideArraysKeepInsertionOrderLikeJs() {
+        var inArray = new LinkedHashMap<String, Object>();
+        inArray.put("z", 1);
+        inArray.put("y", Map.of("b", 1));
+        inArray.put("3", "three");
+        var inner = new HashMap<String, Object>();
+        inner.put("d", null);
+        inner.put("c", 1e-7);
+        var data = new HashMap<String, Object>();
+        data.put("b", "x");
+        data.put("a", List.of(inArray, "lone\uD800", "pair\uD83D\uDE00"));
+        data.put("nested", Map.of("y", 1, "x", inner));
+        // Expected: altcha-lib canonicalJSON (sortKeys does not descend into arrays;
+        // JSON.stringify escapes lone surrogates)
+        assertEquals("{\"a\":[{\"3\":\"three\",\"z\":1,\"y\":{\"b\":1}},\"lone\\ud800\",\"pair\uD83D\uDE00\"],"
+                + "\"b\":\"x\",\"nested\":{\"x\":{\"c\":1e-7,\"d\":null},\"y\":1}}", canonicalData(data));
     }
 
     // -------------------------------------------------------------------------
@@ -530,6 +611,53 @@ public class AltchaV2Test {
         var base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
 
         var result = Altcha.verifySolution(base64, HMAC_SECRET, kdf);
+        assertTrue(result.verified());
+    }
+
+    @Test
+    public void testVerifyJsCreatedChallengeWithNumericData() throws Exception {
+        // Created and solved with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1,
+        // hmacSignatureSecret: HMAC_SECRET, data: {big: 1e21, small: 1e-7, frac: 1.5, one: 1.0,
+        // neg: -0.000001234, sum: 0.1 + 0.2}}), then solveChallenge.
+        var payload = "eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwiZGF0YSI6eyJiaWciOjFlKzIxLCJmcmFjIjoxLjUsIm5lZyI6LTAuMDAwMDAxMjM0LCJvbmUiOjEsInNtYWxsIjoxZS03LCJzdW0iOjAuMzAwMDAwMDAwMDAwMDAwMDR9LCJrZXlMZW5ndGgiOjMyLCJrZXlQcmVmaXgiOiIwMCIsIm5vbmNlIjoiOTg0ZDdmMDJlNTMzZDhmOWE0N2ZhNzlmNjQxY2I1MzciLCJzYWx0IjoiYTNlNGMwZmEzNGEyYmNjNzU0MmU0Yjk1ZTNiMzYyODYifSwic2lnbmF0dXJlIjoiNmIxYTUxMGUyMjJjZTg4Yjc1YjkxOGU3YzUwNWM3N2Q5ZGY3NDVjYTQxMTYzYmIzMDEwMGFmOWZjOWJkYjE4ZCJ9LCJzb2x1dGlvbiI6eyJjb3VudGVyIjoyMDYsImRlcml2ZWRLZXkiOiIwMDc2ZDM4OTNjMjI0OGEyNDMyYzJjMjFjMzMwYmUxODE1MGM5NGIyMTJhNTEyM2E2NDA3MTJhMGFkNDUzNTYwIiwidGltZSI6MC44fX0=";
+
+        var result = Altcha.verifySolution(payload, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertFalse(result.invalidSignature());
+        assertTrue(result.verified());
+    }
+
+    @Test
+    public void testVerifyJavaChallengeWithDoubleDataAfterJsonRoundTrip() throws Exception {
+        // The widget parses challenge.toJson() and sends the parameters back re-serialised.
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .hmacSignatureSecret(HMAC_SECRET)
+                .data(Map.of("one", 1.0, "small", 1e-7, "big", 1e21)));
+        var kdf      = Altcha.kdf("SHA-256");
+        var solution = Altcha.solveChallenge(challenge, kdf);
+        var json     = "{\"challenge\":" + challenge.toJson()
+                + ",\"solution\":{\"counter\":" + solution.counter()
+                + ",\"derivedKey\":\"" + solution.derivedKey() + "\"}}";
+        var base64   = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+
+        var result = Altcha.verifySolution(base64, HMAC_SECRET, kdf);
+
+        assertFalse(result.invalidSignature());
+        assertTrue(result.verified());
+    }
+
+    @Test
+    public void testVerifyJsCreatedChallengeWithNestedData() throws Exception {
+        // Created and solved with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1,
+        // hmacSignatureSecret: HMAC_SECRET, data: {b: 'x', 10: 1, 2: 'two',
+        // a: [{z: 1, y: 2, 3: 'three'}, 'lone\uD800'], nested: {y: 1, x: {d: null, c: 1e-7}}}}), then solveChallenge.
+        var payload = "eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwiZGF0YSI6eyIyIjoidHdvIiwiMTAiOjEsImEiOlt7IjMiOiJ0aHJlZSIsInoiOjEsInkiOjJ9LCJsb25lXHVkODAwIl0sImIiOiJ4IiwibmVzdGVkIjp7IngiOnsiYyI6MWUtNywiZCI6bnVsbH0sInkiOjF9fSwia2V5TGVuZ3RoIjozMiwia2V5UHJlZml4IjoiMDAiLCJub25jZSI6IjBkNTkxNzI1YjU4NWNiYzAyNTVkNjNlNDAyN2IxNDc4Iiwic2FsdCI6IjBiNTA1ODlkMTRlMDk2MDI1OWQ2NjU5ZGRkYjFmOGY4In0sInNpZ25hdHVyZSI6ImMxZjQ4MTdmNWJmYmQ1ZWU5MmU5YTg1MzA2OWZlOWFhYzUyNmEwYWE0ZGQ2MWExYmI1Y2I3N2U4Y2IwZGY4OWIifSwic29sdXRpb24iOnsiY291bnRlciI6MTE0LCJkZXJpdmVkS2V5IjoiMDA1YzE1OTFjMGE0YWQ0ZjMzYjNiMzBmNWEzYmE4YjRmNmY2YTMyNjZkZmFiYjE3YTVkMTU1ZTRiYzdmMmUzNSIsInRpbWUiOjAuMX19";
+
+        var result = Altcha.verifySolution(payload, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertFalse(result.invalidSignature());
         assertTrue(result.verified());
     }
 
