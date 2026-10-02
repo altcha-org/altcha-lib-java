@@ -223,9 +223,10 @@ if (result.verified()) {
 | `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration)` | `Solution` | Same, with a custom timeout (`null`/zero = none) |
 | `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration, CounterMode)` | `Solution` | Same, with a counter mode (`null` = `UINT32`) |
 | `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
+| `verifySolution(String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with optional key-signature secret (fast path; KDF may be `null`) |
 | `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
-| `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (`SHA-256`/`SHA-384`/`SHA-512`; `null` = `SHA-256`) for challenges created with `hmacAlgorithm` |
+| `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (`SHA-256`/`SHA-384`/`SHA-512`, case-insensitive; `null` = `SHA-256`; other names throw) for challenges created with `hmacAlgorithm` |
 | `verifySolution(Challenge, Solution, String, String, String, CounterMode, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with a counter mode (`null` = `UINT32`) |
 | `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
 | `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |
@@ -245,9 +246,9 @@ if (result.verified()) {
 | `CreateChallengeOptions` | mutable builder | Options for `createChallenge` — algorithm, cost, secrets, expiry, data, KDF override |
 | `ChallengeParameters` | record | Parameters embedded in a challenge (algorithm, nonce, salt, cost, keyPrefix, …) |
 | `Challenge` | record | Challenge object sent to the client: `parameters` + HMAC `signature` |
-| `Solution` | record | Solution found by the client: `counter`, `derivedKey`, `time` |
+| `Solution` | record | Solution found by the client: `counter`, `derivedKey`, `time` (ms, 1 decimal) |
 | `Payload` | record | Full client submission: `challenge` + `solution` |
-| `VerifySolutionResult` | record | Verification outcome: `verified`, `expired`, `invalidSignature`, `invalidSolution`, `time` |
+| `VerifySolutionResult` | record | Verification outcome: `verified`, `expired`, `invalidSignature`, `invalidSolution` (`null` when not checked), `time` (ms, 1 decimal); `toJson()` matches the JS result |
 | `ServerSignaturePayload` | record | Raw Sentinel attestation payload |
 | `ServerSignatureVerification` | record | Sentinel verification result: `verified`, `verificationData` |
 | `ServerSignatureVerificationData` | record | Parsed Sentinel data: `score`, `classification`, `email`, `expire`, `fields`, … |

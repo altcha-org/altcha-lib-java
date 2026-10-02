@@ -735,7 +735,7 @@ public class AltchaV2Test {
                 "key-signing-secret", hmacAlgorithm, null);
         assertTrue(result.verified());
 
-        var forged = new Altcha.Solution(solution.counter(), "00".repeat(32), 0L);
+        var forged = new Altcha.Solution(solution.counter(), "00".repeat(32), null);
         var rejected = Altcha.verifySolution(challenge, forged, HMAC_SECRET,
                 "key-signing-secret", hmacAlgorithm, null);
         assertFalse(rejected.verified());
@@ -756,7 +756,7 @@ public class AltchaV2Test {
     @ValueSource(strings = {"abc", "zz", "0g", "\u0660\u0660"})  // odd length, non-hex, non-ASCII digits
     public void testVerifySolutionKeySignatureRejectsMalformedDerivedKey(String derivedKey) throws Exception {
         var challenge = createKeySignatureChallenge();
-        var solution  = new Altcha.Solution(5, derivedKey, 0L);
+        var solution  = new Altcha.Solution(5, derivedKey, null);
 
         var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, "key-signing-secret", null);
 
@@ -770,11 +770,54 @@ public class AltchaV2Test {
         // JS hexToBuffer is case-insensitive, so an uppercase hex key is the same key.
         var challenge = createKeySignatureChallenge();
         var solution  = Altcha.solveChallenge(challenge, Altcha.kdf("SHA-256"));
-        var upper     = new Altcha.Solution(solution.counter(), solution.derivedKey().toUpperCase(), 0L);
+        var upper     = new Altcha.Solution(solution.counter(), solution.derivedKey().toUpperCase(), null);
 
         var result = Altcha.verifySolution(challenge, upper, HMAC_SECRET, "key-signing-secret", null);
 
         assertTrue(result.verified());
+    }
+
+    @Test
+    public void testVerifySolutionBase64WithKeySignatureSecretUsesFastPath() throws Exception {
+        var challenge = createKeySignatureChallenge();
+        var solution  = Altcha.solveChallenge(challenge, Altcha.kdf("SHA-256"));
+        var json      = "{\"challenge\":" + challenge.toJson() + ",\"solution\":{\"counter\":" + solution.counter()
+                + ",\"derivedKey\":\"" + solution.derivedKey() + "\",\"time\":0.8}}";
+        var base64    = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+
+        // No KDF: only the keySignature path can verify it.
+        var result = Altcha.verifySolution(base64, HMAC_SECRET, "key-signing-secret", null);
+
+        assertTrue(result.verified());
+        assertEquals(0.8, Altcha.parsePayload(base64).solution().time());
+    }
+
+    @Test
+    public void testVerifySolutionResultJsonMatchesJsShape() {
+        // JS always emits invalidSignature/invalidSolution (null when unset); time is a float in ms.
+        assertEquals("{\"expired\":true,\"invalidSignature\":null,\"invalidSolution\":null,\"time\":0.3,\"verified\":false}",
+                new Altcha.VerifySolutionResult(false, true, null, null, 0.3).toJson());
+        assertEquals("{\"expired\":false,\"invalidSignature\":false,\"invalidSolution\":false,\"time\":12,\"verified\":true}",
+                new Altcha.VerifySolutionResult(true, false, false, false, 12.0).toJson());
+    }
+
+    @Test
+    public void testHmacAlgorithmNamesFollowWebCrypto() throws Exception {
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .hmacAlgorithm("sha-384")
+                .hmacSignatureSecret(HMAC_SECRET));
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        // WebCrypto names are case-insensitive...
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, null, "SHA-384", kdf).verified());
+        // ...and anything else is rejected instead of silently using SHA-256.
+        for (var unsupported : new String[]{"SHA256", "MD5", ""}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> Altcha.verifySolution(challenge, solution, HMAC_SECRET, null, unsupported, kdf));
+        }
     }
 
     @Test

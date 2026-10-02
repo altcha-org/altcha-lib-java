@@ -111,29 +111,27 @@ public final class Altcha {
         }
     }
 
-    /** The solution found by brute-forcing counter values. */
-    public record Solution(long counter, String derivedKey, Long time) {}
+    /** The solution found by brute-forcing counter values; {@code time} in ms (1 decimal, like JS). */
+    public record Solution(long counter, String derivedKey, Double time) {}
 
     /** Full v2 payload sent from the client after solving. */
     public record Payload(Challenge challenge, Solution solution) {}
 
-    /** Structured result returned by {@link #verifySolution}. */
+    /** Structured result returned by {@link #verifySolution}; {@code time} in ms (1 decimal, like JS). */
     public record VerifySolutionResult(
             boolean verified,
             boolean expired,
             Boolean invalidSignature,  // null when expired before checking
             Boolean invalidSolution,   // null when signature was invalid
-            long time) {
+            double time) {
 
-        /** Serialises this result to a JSON object string. */
+        /** Serialises this result to a JSON object string, with the same fields as the JS result. */
         public String toJson() {
-            var sb = new StringBuilder("{");
-            sb.append("\"expired\":").append(expired).append(',');
-            if (invalidSignature != null) sb.append("\"invalidSignature\":").append(invalidSignature).append(',');
-            if (invalidSolution  != null) sb.append("\"invalidSolution\":").append(invalidSolution).append(',');
-            sb.append("\"time\":").append(time).append(',');
-            sb.append("\"verified\":").append(verified);
-            return sb.append('}').toString();
+            return "{\"expired\":" + expired
+                    + ",\"invalidSignature\":" + invalidSignature
+                    + ",\"invalidSolution\":" + invalidSolution
+                    + ",\"time\":" + jsNumber(time)
+                    + ",\"verified\":" + verified + "}";
         }
     }
 
@@ -501,8 +499,7 @@ public final class Altcha {
             if (timeoutNanos != 0 && iterations % 10 == 0 && System.nanoTime() - t0 > timeoutNanos) return null;
             var derivedKey = kdfFn.deriveKey(params, saltBuf, pw.setCounter(counter)).derivedKey();
             if (keyPrefixMatches(derivedKey, keyPrefix, keyPrefixBuf)) {
-                return new Solution(counter, bytesToHex(derivedKey),
-                        TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0));
+                return new Solution(counter, bytesToHex(derivedKey), elapsed(t0));
             }
             counter += counterStep;
         }
@@ -693,7 +690,7 @@ public final class Altcha {
         var solution  = new Solution(
                 solutionObj.getLong("counter"),
                 solutionObj.getString("derivedKey"),
-                solutionObj.has("time") && !solutionObj.isNull("time") ? solutionObj.getLong("time") : null);
+                solutionObj.has("time") && !solutionObj.isNull("time") ? solutionObj.getDouble("time") : null);
 
         return new Payload(challenge, solution);
     }
@@ -723,8 +720,21 @@ public final class Altcha {
      */
     public static VerifySolutionResult verifySolution(String base64Payload,
             String hmacSignatureSecret, KeyDerivationFunction kdfFn) throws Exception {
+        return verifySolution(base64Payload, hmacSignatureSecret, null, kdfFn);
+    }
+
+    /**
+     * Decodes and verifies a base64-encoded v2 payload, using the key-signature fast path when
+     * the challenge has a {@code keySignature} and {@code hmacKeySignatureSecret} is set.
+     *
+     * @see #verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)
+     */
+    public static VerifySolutionResult verifySolution(String base64Payload,
+            String hmacSignatureSecret, String hmacKeySignatureSecret, KeyDerivationFunction kdfFn)
+            throws Exception {
         var payload = parsePayload(base64Payload);
-        return verifySolution(payload.challenge(), payload.solution(), hmacSignatureSecret, kdfFn);
+        return verifySolution(payload.challenge(), payload.solution(),
+                hmacSignatureSecret, hmacKeySignatureSecret, kdfFn);
     }
 
     // -------------------------------------------------------------------------
@@ -1066,11 +1076,17 @@ public final class Altcha {
         return bytes;
     }
 
+    /**
+     * HMAC as WebCrypto does it: {@code SHA-1}, {@code SHA-256}, {@code SHA-384} or {@code SHA-512}
+     * (case-insensitive); any other name throws, as in JS.
+     */
     static String hmacHex(String algorithm, byte[] data, String key) throws Exception {
-        var hmacName = switch (algorithm) {
-            case "SHA-512" -> "HmacSHA512";
+        var hmacName = switch (algorithm == null ? "" : algorithm.toUpperCase(Locale.ROOT)) {
+            case "SHA-1"   -> "HmacSHA1";
+            case "SHA-256" -> "HmacSHA256";
             case "SHA-384" -> "HmacSHA384";
-            default        -> "HmacSHA256";
+            case "SHA-512" -> "HmacSHA512";
+            default        -> throw new IllegalArgumentException("Unsupported HMAC algorithm: " + algorithm);
         };
         var mac = Mac.getInstance(hmacName);
         mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), hmacName));
@@ -1148,8 +1164,9 @@ public final class Altcha {
         return HexFormat.of().formatHex(bytes);
     }
 
-    private static long elapsed(long t0) {
-        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0);
+    /** Elapsed ms since {@code t0}, floored to 1 decimal like JS {@code timeDuration}. */
+    private static double elapsed(long t0) {
+        return ((System.nanoTime() - t0) / 100_000) / 10.0;
     }
 
     /**
