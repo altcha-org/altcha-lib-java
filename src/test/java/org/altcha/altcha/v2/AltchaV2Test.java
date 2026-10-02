@@ -305,6 +305,7 @@ public class AltchaV2Test {
             "a,   20, a1ec80b3",
             "f2e, 42, f2e25aab6d5e504747ad0f52b1ce42afd99d8014634f263ea42b206300037acf",
             "f2,  42, f2e25aab6d5e504747ad0f52b1ce42afd99d8014634f263ea42b206300037acf",
+            "F2,  42, f2e25aab6d5e504747ad0f52b1ce42afd99d8014634f263ea42b206300037acf",  // even: bytes, case-insensitive
     })
     public void testSolveChallengeKeyPrefixMatchesReference(String keyPrefix, int expectedCounter,
             String expectedKey) throws Exception {

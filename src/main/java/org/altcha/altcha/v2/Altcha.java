@@ -437,15 +437,14 @@ public final class Altcha {
         var nonceBuf      = hexToBytes(params.nonce());
         var saltBuf       = hexToBytes(params.salt());
         var keyPrefix     = params.keyPrefix();
-        // Even-length prefix: byte compare. Odd-length: lowercase hex string prefix match (as in the JS reference).
-        var keyPrefixBuf  = keyPrefix.length() % 2 == 0 ? hexToBytes(keyPrefix) : null;
+        var keyPrefixBuf  = keyPrefixBytes(keyPrefix);
         var pw            = new PasswordBuffer(nonceBuf);
         var t0            = System.nanoTime();
         var counter       = counterStart;
 
         while (true) {
             var derivedKey = kdfFn.deriveKey(params, saltBuf, pw.setCounter(counter)).derivedKey();
-            if (keyPrefixBuf != null ? startsWith(derivedKey, keyPrefixBuf) : hexStartsWith(derivedKey, keyPrefix)) {
+            if (keyPrefixMatches(derivedKey, keyPrefix, keyPrefixBuf)) {
                 return new Solution(counter, bytesToHex(derivedKey),
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0));
             }
@@ -542,10 +541,9 @@ public final class Altcha {
         var nonceBuf = hexToBytes(params.nonce());
         var saltBuf  = hexToBytes(params.salt());
         var pw       = new PasswordBuffer(nonceBuf);
-        var result   = kdfFn.deriveKey(params, saltBuf, pw.setCounter(solution.counter()));
-        var rederived = bytesToHex(result.derivedKey());
-        var keyMatches    = constantTimeEqual(rederived, solution.derivedKey());
-        var prefixMatches = rederived.startsWith(params.keyPrefix());
+        var derivedKey    = kdfFn.deriveKey(params, saltBuf, pw.setCounter(solution.counter())).derivedKey();
+        var keyMatches    = constantTimeEqual(bytesToHex(derivedKey), solution.derivedKey());
+        var prefixMatches = keyPrefixMatches(derivedKey, params.keyPrefix(), keyPrefixBytes(params.keyPrefix()));
         var valid         = keyMatches && prefixMatches;
         return new VerifySolutionResult(valid, false, false, !valid, elapsed(t0));
     }
@@ -1004,6 +1002,19 @@ public final class Altcha {
         var result = 0;
         for (var i = 0; i < a.length(); i++) result |= a.charAt(i) ^ b.charAt(i);
         return result == 0;
+    }
+
+    /**
+     * Decodes an even-length key prefix to bytes (so hex case does not matter); returns
+     * {@code null} for an odd-length prefix, which is matched as lowercase hex. Same as JS.
+     */
+    private static byte[] keyPrefixBytes(String keyPrefix) {
+        return keyPrefix.length() % 2 == 0 ? hexToBytes(keyPrefix) : null;
+    }
+
+    /** JS key-prefix check; {@code keyPrefixBuf} is {@link #keyPrefixBytes(String) keyPrefixBytes(keyPrefix)}. */
+    private static boolean keyPrefixMatches(byte[] derivedKey, String keyPrefix, byte[] keyPrefixBuf) {
+        return keyPrefixBuf != null ? startsWith(derivedKey, keyPrefixBuf) : hexStartsWith(derivedKey, keyPrefix);
     }
 
     static boolean startsWith(byte[] buffer, byte[] prefix) {
