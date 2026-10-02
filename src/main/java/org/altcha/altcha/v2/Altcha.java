@@ -514,6 +514,10 @@ public final class Altcha {
 
         // 4a. Fast path: key signature
         if (params.keySignature() != null && hmacKeySignatureSecret != null) {
+            // Client-controlled: malformed hex is an invalid solution, not an exception.
+            if (!isHex(solution.derivedKey())) {
+                return new VerifySolutionResult(false, false, false, true, elapsed(t0));
+            }
             var derivedKeyBytes = hexToBytes(solution.derivedKey());
             var expectedKeySig  = hmacHex(hmacAlgorithm, derivedKeyBytes, hmacKeySignatureSecret);
             var valid = constantTimeEqual(params.keySignature(), expectedKeySig);
@@ -524,6 +528,9 @@ public final class Altcha {
         if (kdfFn == null) {
             throw new IllegalArgumentException(
                     "kdfFn is required when no keySignature is present in the challenge");
+        }
+        if (solution.derivedKey() == null) {
+            return new VerifySolutionResult(false, false, false, true, elapsed(t0));
         }
         var nonceBuf = hexToBytes(params.nonce());
         var saltBuf  = hexToBytes(params.salt());
@@ -868,6 +875,15 @@ public final class Altcha {
     static byte[] hexToBytes(String hex) {
         if (hex.length() % 2 != 0) throw new IllegalArgumentException("Hex string must have even length: " + hex);
         return HexFormat.of().parseHex(hex);
+    }
+
+    /** Returns {@code true} if {@code s} is non-null, even-length and contains only ASCII hex digits. */
+    static boolean isHex(String s) {
+        if (s == null || s.length() % 2 != 0) return false;
+        for (var i = 0; i < s.length(); i++) {
+            if (!HexFormat.isHexDigit(s.charAt(i))) return false;
+        }
+        return true;
     }
 
     /** Equivalent to {@code bytesToHex(buffer).startsWith(hexPrefix)} without allocating. */

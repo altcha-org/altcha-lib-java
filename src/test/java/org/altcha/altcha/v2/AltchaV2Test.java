@@ -3,6 +3,7 @@ package org.altcha.altcha.v2;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
@@ -345,6 +346,21 @@ public class AltchaV2Test {
     }
 
     @Test
+    public void testVerifySolutionNullDerivedKey() throws Exception {
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .hmacSignatureSecret(HMAC_SECRET));
+        var solution  = new Altcha.Solution(0, null, null);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertFalse(result.verified());
+        assertFalse(result.invalidSignature());
+        assertTrue(result.invalidSolution());
+    }
+
+    @Test
     public void testVerifySolutionSlowPathRejectsWrongKeyPrefix() throws Exception {
         // Regression test: the slow (re-derive) path must reject a solution whose
         // derived key does not satisfy the signed keyPrefix, even when the derived
@@ -445,6 +461,41 @@ public class AltchaV2Test {
                 "key-signing-secret", hmacAlgorithm, null);
         assertFalse(rejected.verified());
         assertTrue(rejected.invalidSolution());
+    }
+
+    private static Altcha.Challenge createKeySignatureChallenge() throws Exception {
+        return Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(5)
+                .hmacSignatureSecret(HMAC_SECRET)
+                .hmacKeySignatureSecret("key-signing-secret"));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    @ValueSource(strings = {"abc", "zz", "0g", "\u0660\u0660"})  // odd length, non-hex, non-ASCII digits
+    public void testVerifySolutionKeySignatureRejectsMalformedDerivedKey(String derivedKey) throws Exception {
+        var challenge = createKeySignatureChallenge();
+        var solution  = new Altcha.Solution(5, derivedKey, 0L);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, "key-signing-secret", null);
+
+        assertFalse(result.verified());
+        assertFalse(result.invalidSignature());
+        assertTrue(result.invalidSolution());
+    }
+
+    @Test
+    public void testVerifySolutionKeySignatureAcceptsUppercaseDerivedKey() throws Exception {
+        // JS hexToBuffer is case-insensitive, so an uppercase hex key is the same key.
+        var challenge = createKeySignatureChallenge();
+        var solution  = Altcha.solveChallenge(challenge, Altcha.kdf("SHA-256"));
+        var upper     = new Altcha.Solution(solution.counter(), solution.derivedKey().toUpperCase(), 0L);
+
+        var result = Altcha.verifySolution(challenge, upper, HMAC_SECRET, "key-signing-secret", null);
+
+        assertTrue(result.verified());
     }
 
     // -------------------------------------------------------------------------
