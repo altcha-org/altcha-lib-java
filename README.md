@@ -144,7 +144,8 @@ var options = new Altcha.CreateChallengeOptions()
 
 Altcha.Challenge challenge = Altcha.createChallenge(options);
 
-// Verify using key signature (fast — no KDF re-invocation)
+// Verify using key signature (fast — no KDF re-invocation).
+// The 5th argument is the HMAC algorithm (null = "SHA-256"); it must match CreateChallengeOptions.hmacAlgorithm.
 Altcha.VerifySolutionResult result = Altcha.verifySolution(
         challenge, solution, "secret", "key-secret", null, null);
 ```
@@ -201,6 +202,7 @@ if (result.verified()) {
 | `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
 | `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
+| `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (`SHA-256`/`SHA-384`/`SHA-512`; `null` = `SHA-256`) for challenges created with `hmacAlgorithm` |
 | `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
 | `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |
 | `verifyFieldsHash(Map<String,String>, String[], String, String)` | `boolean` | Verifies a Sentinel fields hash |

@@ -470,6 +470,9 @@ public final class Altcha {
      * @param solution             the solution submitted by the client
      * @param hmacSignatureSecret     the secret used when the challenge was signed (required)
      * @param hmacKeySignatureSecret  optional secret for fast key-signature verification
+     * @param hmacAlgorithm           HMAC algorithm used when the challenge was signed
+     *                                ({@code "SHA-256"}, {@code "SHA-384"} or {@code "SHA-512"});
+     *                                {@code null} means {@link #DEFAULT_HMAC_ALGORITHM}
      * @param kdfFn                   KDF to use when re-deriving (may be {@code null} if
      *                                {@code keySignature} is present)
      */
@@ -478,6 +481,7 @@ public final class Altcha {
             Solution solution,
             String hmacSignatureSecret,
             String hmacKeySignatureSecret,
+            String hmacAlgorithm,
             KeyDerivationFunction kdfFn) throws Exception {
 
         if (hmacSignatureSecret == null || hmacSignatureSecret.isBlank()) {
@@ -498,7 +502,7 @@ public final class Altcha {
         }
 
         // 3. Verify challenge signature
-        var hmacAlgorithm = DEFAULT_HMAC_ALGORITHM;
+        if (hmacAlgorithm == null) hmacAlgorithm = DEFAULT_HMAC_ALGORITHM;
         var expectedSig = hmacHex(hmacAlgorithm,
                 canonicalJson(params).getBytes(StandardCharsets.UTF_8),
                 hmacSignatureSecret);
@@ -530,11 +534,19 @@ public final class Altcha {
         return new VerifySolutionResult(valid, false, false, !valid, elapsed(t0));
     }
 
-    /** Convenience overload with no key-signature secret. */
+    /** Convenience overload using {@link #DEFAULT_HMAC_ALGORITHM}. */
+    public static VerifySolutionResult verifySolution(
+            Challenge challenge, Solution solution,
+            String hmacSignatureSecret, String hmacKeySignatureSecret,
+            KeyDerivationFunction kdfFn) throws Exception {
+        return verifySolution(challenge, solution, hmacSignatureSecret, hmacKeySignatureSecret, null, kdfFn);
+    }
+
+    /** Convenience overload with no key-signature secret, using {@link #DEFAULT_HMAC_ALGORITHM}. */
     public static VerifySolutionResult verifySolution(
             Challenge challenge, Solution solution,
             String hmacSignatureSecret, KeyDerivationFunction kdfFn) throws Exception {
-        return verifySolution(challenge, solution, hmacSignatureSecret, null, kdfFn);
+        return verifySolution(challenge, solution, hmacSignatureSecret, null, null, kdfFn);
     }
 
     // -------------------------------------------------------------------------

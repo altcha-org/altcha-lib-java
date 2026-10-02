@@ -378,6 +378,52 @@ public class AltchaV2Test {
         assertTrue(result.verified());
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"SHA-384", "SHA-512"})
+    public void testVerifySolutionHonoursHmacAlgorithm(String hmacAlgorithm) throws Exception {
+        var opts = new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .hmacAlgorithm(hmacAlgorithm)
+                .hmacSignatureSecret(HMAC_SECRET);
+        var challenge = Altcha.createChallenge(opts);
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, null, hmacAlgorithm, kdf);
+        assertTrue(result.verified());
+
+        // Verifying with the default (SHA-256) must not accept a challenge signed with another algorithm
+        var mismatched = Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf);
+        assertFalse(mismatched.verified());
+        assertTrue(mismatched.invalidSignature());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SHA-384", "SHA-512"})
+    public void testVerifySolutionKeySignatureHonoursHmacAlgorithm(String hmacAlgorithm) throws Exception {
+        var opts = new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .counter(5)
+                .hmacAlgorithm(hmacAlgorithm)
+                .hmacSignatureSecret(HMAC_SECRET)
+                .hmacKeySignatureSecret("key-signing-secret");
+        var challenge = Altcha.createChallenge(opts);
+        var solution  = Altcha.solveChallenge(challenge, Altcha.kdf("SHA-256"));
+
+        // No KDF: must succeed via the keySignature path
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET,
+                "key-signing-secret", hmacAlgorithm, null);
+        assertTrue(result.verified());
+
+        var forged = new Altcha.Solution(solution.counter(), "00".repeat(32), 0L);
+        var rejected = Altcha.verifySolution(challenge, forged, HMAC_SECRET,
+                "key-signing-secret", hmacAlgorithm, null);
+        assertFalse(rejected.verified());
+        assertTrue(rejected.invalidSolution());
+    }
+
     // -------------------------------------------------------------------------
     // Base64 payload round-trip
     // -------------------------------------------------------------------------
