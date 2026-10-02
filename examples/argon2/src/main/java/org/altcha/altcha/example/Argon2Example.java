@@ -60,6 +60,7 @@ public class Argon2Example {
         // Client: brute-force the counter
         // ----------------------------------------------------------------
         var solution = Altcha.solveChallenge(challenge, ARGON2_KDF);
+        if (solution == null) throw new IllegalStateException("No solution within " + Altcha.DEFAULT_SOLVE_TIMEOUT);
         System.out.println("\nSolution counter: " + solution.counter());
         System.out.println("Derived key:      " + solution.derivedKey());
 

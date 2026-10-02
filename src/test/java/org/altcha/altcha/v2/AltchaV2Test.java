@@ -8,6 +8,7 @@ import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.HexFormat;
@@ -357,6 +358,52 @@ public class AltchaV2Test {
         assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf).verified());
     }
 
+    private static Altcha.Challenge fixedShaChallenge(String keyPrefix) throws Exception {
+        return new Altcha.Challenge(new Altcha.ChallengeParameters(
+                "SHA-256", "aabbccdd00112233aabbccdd00112233", "11223344556677889900aabbccddeeff",
+                1, 32, keyPrefix, null, null, null, null, null), null);
+    }
+
+    @Test
+    @Timeout(10)
+    public void testSolveChallengeReturnsNullOnTimeout() throws Exception {
+        var unsolvable = fixedShaChallenge("00".repeat(32));
+        var t0         = System.nanoTime();
+
+        var solution = Altcha.solveChallenge(unsolvable, Altcha.kdf("SHA-256"), 0, 1, Duration.ofMillis(200));
+
+        assertNull(solution);
+        assertTrue(Duration.ofNanos(System.nanoTime() - t0).toMillis() >= 200);
+    }
+
+    @Test
+    @Timeout(10)
+    public void testSolveChallengeAbortsOnInterrupt() throws Exception {
+        var unsolvable = fixedShaChallenge("00".repeat(32));
+        try {
+            Thread.currentThread().interrupt();
+            assertThrows(InterruptedException.class,
+                    () -> Altcha.solveChallenge(unsolvable, Altcha.kdf("SHA-256"), 0, 1, null));
+            assertFalse(Thread.currentThread().isInterrupted());
+        } finally {
+            Thread.interrupted();
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // counterStart, expected counter, expected derived key (altcha-lib v2 solveChallenge)
+            "2147483647, 2147483658, 001ac71a8b052c3864e44beea41b16d6d2303a15a87b597f12cb6a4cb3048c57",
+            "4294967290, 4294967359, 0715bcc59816aac52700c766a481fe48044539f64bed473f9853d585cdaa871e",
+    })
+    public void testSolveChallengeCounterBeyondInt32MatchesReference(long counterStart, long expectedCounter,
+            String expectedKey) throws Exception {
+        var solution = Altcha.solveChallenge(fixedShaChallenge("0"), Altcha.kdf("SHA-256"), counterStart, 1);
+
+        assertEquals(expectedCounter, solution.counter());
+        assertEquals(expectedKey, solution.derivedKey());
+    }
+
     // -------------------------------------------------------------------------
     // verifySolution
     // -------------------------------------------------------------------------
@@ -448,6 +495,19 @@ public class AltchaV2Test {
 
         assertTrue(result.verified());
         assertFalse(result.expired());
+    }
+
+    @Test
+    public void testVerifyJsCreatedChallengeWithCounterBeyondInt32() throws Exception {
+        // Created with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1, keyPrefix: '0',
+        // hmacSignatureSecret: HMAC_SECRET}), then solveChallenge({counterStart: 3_000_000_000}) → counter 3000000004.
+        var payload = "eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwia2V5TGVuZ3RoIjozMiwia2V5UHJlZml4IjoiMCIsIm5vbmNlIjoiOGZkMTA4MTUxYzdhNmY5OTY3OGQyODc2Yjc0OGYxMTMiLCJzYWx0IjoiZWJkZWQxOTlhNjA2YTViMjU1MmZjOGUwODc3ZTU1NzQifSwic2lnbmF0dXJlIjoiY2JkM2M3ZTIxMzQ2Mjk2YjEyZWZhNDU2MzJlZGJkNDQxN2I3MzI3OTcyOWUwYzJlZDBjZjMwNjM0ZWM2MzNkMyJ9LCJzb2x1dGlvbiI6eyJjb3VudGVyIjozMDAwMDAwMDA0LCJkZXJpdmVkS2V5IjoiMDMyYmRlMWVjNjA3ZWI4MjNhMGUwYTA1ZWQ4YjFlZWQxOTExOTRkMDE4MTU2Y2I2YzNmZTJhYmRmMDUyMTBiMCIsInRpbWUiOjB9fQ==";
+
+        var payloadObj = Altcha.parsePayload(payload);
+        var result     = Altcha.verifySolution(payload, HMAC_SECRET, Altcha.kdf("SHA-256"));
+
+        assertEquals(3_000_000_004L, payloadObj.solution().counter());
+        assertTrue(result.verified());
     }
 
     @Test

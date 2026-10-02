@@ -90,8 +90,14 @@ External KDFs (Argon2id, Scrypt) can be plugged in via the `KeyDerivationFunctio
 
 ```java
 var kdf      = Altcha.kdf(challenge.parameters().algorithm());
-var solution = Altcha.solveChallenge(challenge, kdf);
+var solution = Altcha.solveChallenge(challenge, kdf);  // null if not solved within 90 s
 // Encode {challenge, solution} as JSON, base64 it, and submit
+```
+
+Like the JavaScript library, `solveChallenge` gives up after `Altcha.DEFAULT_SOLVE_TIMEOUT` (90 s) and returns `null`; pass a `Duration` to change it (`null` or zero disables it). To abort a running solve, interrupt its thread (e.g. `Future.cancel(true)`); it then throws `InterruptedException`.
+
+```java
+var solution = Altcha.solveChallenge(challenge, kdf, 0, 1, Duration.ofSeconds(10));
 ```
 
 ### Verify a solution (server)
@@ -199,8 +205,9 @@ if (result.verified()) {
 |--------|---------|-------------|
 | `createChallenge(CreateChallengeOptions)` | `Challenge` | Creates a new signed v2 challenge |
 | `signChallenge(String, ChallengeParameters, byte[], String, String)` | `Challenge` | Signs challenge parameters with HMAC |
-| `solveChallenge(Challenge, KeyDerivationFunction)` | `Solution` | Brute-forces a solution (counter start=0, step=1) |
-| `solveChallenge(Challenge, KeyDerivationFunction, int, int)` | `Solution` | Brute-forces a solution with custom start/step |
+| `solveChallenge(Challenge, KeyDerivationFunction)` | `Solution` | Brute-forces a solution (counter start=0, step=1, 90 s timeout; `null` on timeout) |
+| `solveChallenge(Challenge, KeyDerivationFunction, long, long)` | `Solution` | Brute-forces a solution with custom start/step (90 s timeout) |
+| `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration)` | `Solution` | Same, with a custom timeout (`null`/zero = none) |
 | `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
 | `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |

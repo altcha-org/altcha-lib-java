@@ -8,6 +8,7 @@ import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import org.json.JSONArray;
@@ -37,6 +38,8 @@ public final class Altcha {
     public static final int    DEFAULT_KEY_LENGTH   = 32;
     public static final String DEFAULT_KEY_PREFIX   = "00";
     public static final String DEFAULT_HMAC_ALGORITHM = "SHA-256";
+    /** Default {@link #solveChallenge} timeout, as in the JS library. */
+    public static final Duration DEFAULT_SOLVE_TIMEOUT = Duration.ofSeconds(90);
 
     private Altcha() {}
 
@@ -109,7 +112,7 @@ public final class Altcha {
     }
 
     /** The solution found by brute-forcing counter values. */
-    public record Solution(int counter, String derivedKey, Long time) {}
+    public record Solution(long counter, String derivedKey, Long time) {}
 
     /** Full v2 payload sent from the client after solving. */
     public record Payload(Challenge challenge, Solution solution) {}
@@ -240,9 +243,10 @@ public final class Altcha {
     /**
      * Manages the password buffer passed to the KDF for each counter iteration.
      *
-     * <p>The counter is appended to the nonce as a big-endian 32-bit unsigned integer.
-     * The returned array from {@link #setCounter} is a view of an internal buffer –
-     * do not retain a reference across iterations.</p>
+     * <p>The counter is appended to the nonce as a big-endian 32-bit unsigned integer
+     * (its low 32 bits, like JS {@code DataView.setUint32}). The returned array from
+     * {@link #setCounter} is a view of an internal buffer – do not retain a reference
+     * across iterations.</p>
      */
     public static final class PasswordBuffer {
         private final byte[] nonce;
@@ -255,7 +259,7 @@ public final class Altcha {
         }
 
         /** Updates the counter bytes in-place and returns the combined nonce+counter buffer. */
-        public byte[] setCounter(int n) {
+        public byte[] setCounter(long n) {
             buffer[nonce.length]     = (byte) (n >>> 24);
             buffer[nonce.length + 1] = (byte) (n >>> 16);
             buffer[nonce.length + 2] = (byte) (n >>> 8);
@@ -270,7 +274,7 @@ public final class Altcha {
 
     public static final class CreateChallengeOptions {
         public String algorithm;
-        public Integer counter;
+        public Long counter;
         public int cost;
         public Map<String, Object> data;
         public KeyDerivationFunction deriveKey;
@@ -285,7 +289,7 @@ public final class Altcha {
         public Integer parallelism;
 
         public CreateChallengeOptions algorithm(String v)                  { algorithm = v; return this; }
-        public CreateChallengeOptions counter(Integer v)                   { counter = v; return this; }
+        public CreateChallengeOptions counter(long v)                      { counter = v; return this; }
         public CreateChallengeOptions cost(int v)                          { cost = v; return this; }
         public CreateChallengeOptions data(Map<String, Object> v)          { data = v; return this; }
         public CreateChallengeOptions deriveKey(KeyDerivationFunction v)   { deriveKey = v; return this; }
@@ -426,23 +430,33 @@ public final class Altcha {
     /**
      * Brute-forces counter values until the derived key starts with the required prefix.
      *
+     * <p>Like the JS library, gives up after {@code timeout} (checked every 10 attempts)
+     * and returns {@code null}. To abort a running solve, interrupt its thread
+     * (e.g. {@code Future.cancel(true)}).</p>
+     *
      * @param challenge    the challenge to solve
      * @param kdfFn        the KDF to use (must match the algorithm in the challenge)
      * @param counterStart starting counter value (0 for a fresh solve)
      * @param counterStep  increment between attempts (1 for single-threaded)
+     * @param timeout      maximum solving time; {@code null} or zero means no timeout
+     * @return the solution, or {@code null} if the timeout elapsed first
+     * @throws InterruptedException if the calling thread is interrupted
      */
     public static Solution solveChallenge(Challenge challenge, KeyDerivationFunction kdfFn,
-            int counterStart, int counterStep) throws Exception {
+            long counterStart, long counterStep, Duration timeout) throws Exception {
         var params        = challenge.parameters();
         var nonceBuf      = hexToBytes(params.nonce());
         var saltBuf       = hexToBytes(params.salt());
         var keyPrefix     = params.keyPrefix();
         var keyPrefixBuf  = keyPrefixBytes(keyPrefix);
         var pw            = new PasswordBuffer(nonceBuf);
+        var timeoutNanos  = timeout == null ? 0 : TimeUnit.NANOSECONDS.convert(timeout);
         var t0            = System.nanoTime();
         var counter       = counterStart;
 
-        while (true) {
+        for (var iterations = 0L; ; iterations++) {
+            if (Thread.interrupted()) throw new InterruptedException("solveChallenge interrupted");
+            if (timeoutNanos != 0 && iterations % 10 == 0 && System.nanoTime() - t0 > timeoutNanos) return null;
             var derivedKey = kdfFn.deriveKey(params, saltBuf, pw.setCounter(counter)).derivedKey();
             if (keyPrefixMatches(derivedKey, keyPrefix, keyPrefixBuf)) {
                 return new Solution(counter, bytesToHex(derivedKey),
@@ -452,10 +466,16 @@ public final class Altcha {
         }
     }
 
-    /** Convenience overload: starts at counter 0, step 1. */
+    /** Solves with custom start/step and {@link #DEFAULT_SOLVE_TIMEOUT}; returns {@code null} on timeout. */
+    public static Solution solveChallenge(Challenge challenge, KeyDerivationFunction kdfFn,
+            long counterStart, long counterStep) throws Exception {
+        return solveChallenge(challenge, kdfFn, counterStart, counterStep, DEFAULT_SOLVE_TIMEOUT);
+    }
+
+    /** Starts at counter 0, step 1, with {@link #DEFAULT_SOLVE_TIMEOUT}; returns {@code null} on timeout. */
     public static Solution solveChallenge(Challenge challenge, KeyDerivationFunction kdfFn)
             throws Exception {
-        return solveChallenge(challenge, kdfFn, 0, 1);
+        return solveChallenge(challenge, kdfFn, 0, 1, DEFAULT_SOLVE_TIMEOUT);
     }
 
     // -------------------------------------------------------------------------
@@ -611,7 +631,7 @@ public final class Altcha {
         var challenge = new Challenge(params,
                 challengeObj.optString("signature", null));
         var solution  = new Solution(
-                solutionObj.getInt("counter"),
+                solutionObj.getLong("counter"),
                 solutionObj.getString("derivedKey"),
                 solutionObj.has("time") && !solutionObj.isNull("time") ? solutionObj.getLong("time") : null);
 
