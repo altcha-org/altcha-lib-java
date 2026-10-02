@@ -238,7 +238,7 @@ Verification data is parsed like the JavaScript library's `parseVerificationData
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
 | `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (WebCrypto names `SHA-256`/`SHA-384`/`SHA-512`/`SHA-1`, case-insensitive; `null` = `SHA-256`; other names throw) for challenges created with `hmacAlgorithm` |
 | `verifySolution(Challenge, Solution, String, String, String, CounterMode, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with a counter mode (`null` = `UINT32`) |
-| `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
+| `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects (parsed like JS `JSON.parse`: non-standard JSON such as `01`, `'a'` or unquoted strings is rejected) |
 | `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |
 | `verifyFieldsHash(Map<String,String>, String[], String, String)` | `boolean` | Verifies a Sentinel fields hash |
 | `verifyServerSignature(ServerSignaturePayload, String)` | `ServerSignatureVerification` | Verifies a typed Sentinel server-signature payload |

@@ -1146,6 +1146,27 @@ public class AltchaV2Test {
         });
     }
 
+    @Test
+    public void testPayloadJsonNumbersParseInLinearTime() {
+        // Unauthenticated input: org.json's BigInteger/BigDecimal parsing took ~10 s per entry point here.
+        var digits = "1".repeat(1_000_000);
+        var solution = b64("{\"challenge\":{\"parameters\":{\"algorithm\":\"SHA-256\",\"nonce\":\"00\",\"salt\":\"00\","
+                + "\"cost\":1,\"keyLength\":32,\"keyPrefix\":\"00\",\"data\":{\"x\":" + digits + ".5}},\"signature\":\"00\"},"
+                + "\"solution\":{\"counter\":1,\"derivedKey\":\"00\"}}");
+        var server = b64("{\"algorithm\":\"SHA-256\",\"verificationData\":\"verified=true\",\"signature\":\"00\","
+                + "\"verified\":true,\"x\":" + digits + "}");
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            // Like JSON.parse, the number becomes Infinity: a clean invalidSignature, not an exception
+            assertTrue(Altcha.verifySolution(solution, HMAC_SECRET, Altcha.sha()).invalidSignature());
+            assertTrue(Altcha.isServerSignaturePayload(server));
+            assertTrue(Altcha.verifyServerSignature(server, HMAC_SECRET).invalidSignature());
+        });
+    }
+
+    private static String b64(String json) {
+        return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+    }
+
     // -------------------------------------------------------------------------
     // Require hmacSignatureSecret
     // -------------------------------------------------------------------------

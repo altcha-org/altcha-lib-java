@@ -12,6 +12,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -666,36 +667,29 @@ public final class Altcha {
      */
     public static Payload parsePayload(String base64Payload) throws Exception {
         // Parsed with insertion order preserved: canonical JSON keeps the key order of objects inside arrays.
-        var json = new JSONTokener(
-                new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        var root = parseOrdered(json);
-        if (json.nextClean() != 0) throw json.syntaxError("Unexpected trailing content");
-        var rootMap       = asObject(root, "payload");
-        var challengeMap  = asObject(rootMap.get("challenge"), "challenge");
-        var paramsMap     = asObject(challengeMap.get("parameters"), "parameters");
-        var challengeObj  = new JSONObject(challengeMap);
-        var paramsObj     = new JSONObject(paramsMap);
-        var solutionObj   = new JSONObject(asObject(rootMap.get("solution"), "solution"));
+        var rootMap     = asObject(parseBase64Json(base64Payload), "payload");
+        var challengeMap = asObject(rootMap.get("challenge"), "challenge");
+        var paramsMap   = asObject(challengeMap.get("parameters"), "parameters");
+        var solutionMap = asObject(rootMap.get("solution"), "solution");
 
         var params = new ChallengeParameters(
-                paramsObj.getString("algorithm"),
-                paramsObj.getString("nonce"),
-                paramsObj.getString("salt"),
-                paramsObj.getInt("cost"),
-                paramsObj.getInt("keyLength"),
-                paramsObj.getString("keyPrefix"),
-                paramsObj.optString("keySignature", null),
-                paramsObj.has("memoryCost") && !paramsObj.isNull("memoryCost") ? paramsObj.getInt("memoryCost") : null,
-                paramsObj.has("parallelism") && !paramsObj.isNull("parallelism") ? paramsObj.getInt("parallelism") : null,
+                requiredString(paramsMap, "algorithm"),
+                requiredString(paramsMap, "nonce"),
+                requiredString(paramsMap, "salt"),
+                requiredNumber(paramsMap, "cost", Integer::parseInt, Number::intValue),
+                requiredNumber(paramsMap, "keyLength", Integer::parseInt, Number::intValue),
+                requiredString(paramsMap, "keyPrefix"),
+                optionalString(paramsMap, "keySignature"),
+                paramsMap.get("memoryCost") != null ? requiredNumber(paramsMap, "memoryCost", Integer::parseInt, Number::intValue) : null,
+                paramsMap.get("parallelism") != null ? requiredNumber(paramsMap, "parallelism", Integer::parseInt, Number::intValue) : null,
                 paramsMap.get("expiresAt") != null ? jsonNumber(paramsMap.get("expiresAt"), "expiresAt") : null,
                 paramsMap.get("data") != null ? asObject(paramsMap.get("data"), "data") : null);
 
-        var challenge = new Challenge(params,
-                challengeObj.optString("signature", null));
+        var challenge = new Challenge(params, optionalString(challengeMap, "signature"));
         var solution  = new Solution(
-                solutionObj.getLong("counter"),
-                solutionObj.getString("derivedKey"),
-                solutionObj.has("time") && !solutionObj.isNull("time") ? solutionObj.getDouble("time") : null);
+                requiredNumber(solutionMap, "counter", Long::parseLong, Number::longValue),
+                requiredString(solutionMap, "derivedKey"),
+                solutionMap.get("time") != null ? requiredNumber(solutionMap, "time", Double::parseDouble, Number::doubleValue) : null);
 
         return new Payload(challenge, solution);
     }
@@ -709,9 +703,7 @@ public final class Altcha {
      */
     public static boolean isServerSignaturePayload(String base64Payload) {
         try {
-            var json = new JSONObject(
-                    new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-            return json.has("verificationData");
+            return parseBase64Json(base64Payload) instanceof Map<?, ?> json && json.containsKey("verificationData");
         } catch (Exception e) {
             return false;
         }
@@ -803,19 +795,18 @@ public final class Altcha {
     /** Decodes and verifies a base64-encoded Sentinel server-signature payload. */
     public static ServerSignatureVerification verifyServerSignature(
             String base64Payload, String hmacKey) throws Exception {
-        var json = new JSONObject(
-                new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
+        var json = asObject(parseBase64Json(base64Payload), "payload");
         return verifyServerSignature(new ServerSignaturePayload(
                 stringField(json, "algorithm"),
                 stringField(json, "apiKey"),
                 stringField(json, "id"),
                 stringField(json, "verificationData"),
                 stringField(json, "signature"),
-                Boolean.TRUE.equals(json.opt("verified"))), hmacKey);
+                Boolean.TRUE.equals(json.get("verified"))), hmacKey);
     }
 
-    private static String stringField(JSONObject json, String key) {
-        return json.opt(key) instanceof String s ? s : null;
+    private static String stringField(Map<String, Object> json, String key) {
+        return json.get(key) instanceof String s ? s : null;
     }
 
     /**
@@ -1361,10 +1352,20 @@ public final class Altcha {
         return ((System.nanoTime() - t0) / 100_000) / 10.0;
     }
 
+    /** Decodes base64 and parses the JSON document with {@link #parseOrdered}; trailing content is an error. */
+    private static Object parseBase64Json(String base64Payload) {
+        var x = new JSONTokener(new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
+        var value = parseOrdered(x);
+        if (x.nextClean() != 0) throw x.syntaxError("Unexpected trailing content");
+        return value;
+    }
+
     /**
      * Parses a JSON value like JS {@code JSON.parse}: objects become insertion-ordered maps
      * (a duplicate key keeps its first position and its last value), arrays become lists,
-     * {@code null} becomes Java {@code null}. Strings and numbers are parsed by org.json.
+     * {@code null} becomes Java {@code null}. Scalars are parsed here rather than by org.json,
+     * whose BigInteger/BigDecimal number parsing is quadratic in the digit count (the input is
+     * unauthenticated).
      */
     private static Object parseOrdered(JSONTokener x) {
         var c = x.nextClean();
@@ -1393,15 +1394,72 @@ public final class Altcha {
                 if (c != ',') throw x.syntaxError("Expected ',' or ']'");
             }
         }
-        x.back();
-        var value = x.nextValue();
-        return JSONObject.NULL.equals(value) ? null : value;
+        if (c == '"') return x.nextString('"');
+        var token = new StringBuilder();
+        for (; c != 0 && ",:]} \t\n\r".indexOf(c) < 0; c = x.next()) token.append(c);
+        if (c != 0) x.back();
+        return jsonScalar(token.toString(), x);
+    }
+
+    private static final Pattern JSON_NUMBER =
+            Pattern.compile("-?+(?:0|[1-9]\\d*+)(\\.\\d++)?+([eE][+-]?+\\d++)?+");
+
+    /**
+     * A JSON literal or number. Integer literals keep org.json's types ({@code Integer}, else
+     * {@code Long}); anything else becomes the nearest {@code Double}, as in JS.
+     */
+    private static Object jsonScalar(String token, JSONTokener x) {
+        switch (token) {
+            case "true":  return Boolean.TRUE;
+            case "false": return Boolean.FALSE;
+            case "null":  return null;
+            default:      break;
+        }
+        var m = JSON_NUMBER.matcher(token);
+        if (!m.matches()) {
+            throw x.syntaxError("Unexpected token '" + token.substring(0, Math.min(token.length(), 32)) + "'");
+        }
+        if (m.group(1) == null && m.group(2) == null && token.length() <= 20) {
+            try {
+                var l = Long.parseLong(token);
+                if (l == (int) l) return (int) l;
+                return l;
+            } catch (NumberFormatException beyondLong) {
+                // falls through to the nearest double
+            }
+        }
+        return Double.parseDouble(token);
     }
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> asObject(Object value, String name) {
         if (!(value instanceof Map<?, ?>)) throw new JSONException("\"" + name + "\" is not a JSON object");
         return (Map<String, Object>) value;
+    }
+
+    /** A required string field, like org.json {@code getString}. */
+    private static String requiredString(Map<String, Object> map, String key) {
+        if (map.get(key) instanceof String s) return s;
+        throw new JSONException("\"" + key + "\" is not a string");
+    }
+
+    /** An optional field as a string, like org.json {@code optString(key, null)}. */
+    private static String optionalString(Map<String, Object> map, String key) {
+        var value = map.get(key);
+        return value == null ? null : value.toString();
+    }
+
+    /** A required numeric field, like org.json {@code getInt}/{@code getLong}/{@code getDouble}: a number or a numeric string. */
+    private static <T> T requiredNumber(Map<String, Object> map, String key,
+            Function<String, T> parse, Function<Number, T> convert) {
+        var value = map.get(key);
+        if (value instanceof Number n) return convert.apply(n);
+        if (value == null) throw new JSONException("\"" + key + "\" not found");
+        try {
+            return parse.apply(value.toString());
+        } catch (NumberFormatException e) {
+            throw new JSONException("\"" + key + "\" is not a number", e);
+        }
     }
 
     /** A parsed JSON number as JS holds it: {@code Long} for integer literals, otherwise the nearest {@code Double}. */
