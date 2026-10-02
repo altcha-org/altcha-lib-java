@@ -10,7 +10,7 @@ import java.security.SecureRandom;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-import org.json.JSONObject;
+import org.altcha.altcha.internal.Json;
 
 /**
  * ALTCHA v1 – simple hashcash-style proof-of-work.
@@ -235,16 +235,16 @@ public final class Altcha {
     }
 
     public static boolean verifySolution(String base64Payload, String hmacKey, boolean checkExpires) throws Exception {
-        var json = new JSONObject(new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        if (!json.has("algorithm") || !json.has("challenge") || !json.has("number")
-                || !json.has("salt") || !json.has("signature")) return false;
+        var json = Json.asObject(Json.parseBase64(base64Payload), "payload");
+        if (!json.containsKey("algorithm") || !json.containsKey("challenge") || !json.containsKey("number")
+                || !json.containsKey("salt") || !json.containsKey("signature")) return false;
 
         var payload = new Payload(
-                json.getString("algorithm"),
-                json.getString("challenge"),
-                json.getLong("number"),
-                json.getString("salt"),
-                json.getString("signature"));
+                Json.requiredString(json, "algorithm"),
+                Json.requiredString(json, "challenge"),
+                Json.requiredNumber(json, "number", Long::parseLong, Number::longValue),
+                Json.requiredString(json, "salt"),
+                Json.requiredString(json, "signature"));
         return verifySolutionInternal(payload, hmacKey, checkExpires);
     }
 
@@ -297,19 +297,19 @@ public final class Altcha {
 
     public static ServerSignatureVerification verifyServerSignature(String base64Payload,
             String hmacKey) throws Exception {
-        var json = new JSONObject(new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        if (!json.has("algorithm") || !json.has("verificationData")
-                || !json.has("signature") || !json.has("verified")) {
+        var json = Json.asObject(Json.parseBase64(base64Payload), "payload");
+        if (!json.containsKey("algorithm") || !json.containsKey("verificationData")
+                || !json.containsKey("signature") || !json.containsKey("verified")) {
             return new ServerSignatureVerification(false, null);
         }
 
         var payload = new ServerSignaturePayload(
-                Algorithm.fromString(json.getString("algorithm")),
-                json.optString("apiKey", null),
-                json.optString("id", null),
-                json.getString("verificationData"),
-                json.getString("signature"),
-                json.getBoolean("verified"));
+                Algorithm.fromString(Json.requiredString(json, "algorithm")),
+                Json.optionalString(json, "apiKey"),
+                Json.optionalString(json, "id"),
+                Json.requiredString(json, "verificationData"),
+                Json.requiredString(json, "signature"),
+                Json.requiredBoolean(json, "verified"));
         return verifyServerSignatureInternal(payload, hmacKey);
     }
 

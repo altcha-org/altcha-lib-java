@@ -17,7 +17,12 @@ import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONTokener;
+import org.altcha.altcha.internal.Json;
+
+import static org.altcha.altcha.internal.Json.asObject;
+import static org.altcha.altcha.internal.Json.optionalString;
+import static org.altcha.altcha.internal.Json.requiredNumber;
+import static org.altcha.altcha.internal.Json.requiredString;
 
 /**
  * ALTCHA v2 – key-derivation-based proof-of-work.
@@ -667,7 +672,7 @@ public final class Altcha {
      */
     public static Payload parsePayload(String base64Payload) throws Exception {
         // Parsed with insertion order preserved: canonical JSON keeps the key order of objects inside arrays.
-        var rootMap     = asObject(parseBase64Json(base64Payload), "payload");
+        var rootMap     = asObject(Json.parseBase64(base64Payload), "payload");
         var challengeMap = asObject(rootMap.get("challenge"), "challenge");
         var paramsMap   = asObject(challengeMap.get("parameters"), "parameters");
         var solutionMap = asObject(rootMap.get("solution"), "solution");
@@ -703,7 +708,7 @@ public final class Altcha {
      */
     public static boolean isServerSignaturePayload(String base64Payload) {
         try {
-            return parseBase64Json(base64Payload) instanceof Map<?, ?> json && json.containsKey("verificationData");
+            return Json.parseBase64(base64Payload) instanceof Map<?, ?> json && json.containsKey("verificationData");
         } catch (Exception e) {
             return false;
         }
@@ -795,7 +800,7 @@ public final class Altcha {
     /** Decodes and verifies a base64-encoded Sentinel server-signature payload. */
     public static ServerSignatureVerification verifyServerSignature(
             String base64Payload, String hmacKey) throws Exception {
-        var json = asObject(parseBase64Json(base64Payload), "payload");
+        var json = asObject(Json.parseBase64(base64Payload), "payload");
         return verifyServerSignature(new ServerSignaturePayload(
                 stringField(json, "algorithm"),
                 stringField(json, "apiKey"),
@@ -1350,116 +1355,6 @@ public final class Altcha {
     /** Elapsed ms since {@code t0}, floored to 1 decimal like JS {@code timeDuration}. */
     private static double elapsed(long t0) {
         return ((System.nanoTime() - t0) / 100_000) / 10.0;
-    }
-
-    /** Decodes base64 and parses the JSON document with {@link #parseOrdered}; trailing content is an error. */
-    private static Object parseBase64Json(String base64Payload) {
-        var x = new JSONTokener(new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        var value = parseOrdered(x);
-        if (x.nextClean() != 0) throw x.syntaxError("Unexpected trailing content");
-        return value;
-    }
-
-    /**
-     * Parses a JSON value like JS {@code JSON.parse}: objects become insertion-ordered maps
-     * (a duplicate key keeps its first position and its last value), arrays become lists,
-     * {@code null} becomes Java {@code null}. Scalars are parsed here rather than by org.json,
-     * whose BigInteger/BigDecimal number parsing is quadratic in the digit count (the input is
-     * unauthenticated).
-     */
-    private static Object parseOrdered(JSONTokener x) {
-        var c = x.nextClean();
-        if (c == '{') {
-            var map = new LinkedHashMap<String, Object>();
-            if (x.nextClean() == '}') return map;
-            x.back();
-            while (true) {
-                if (x.nextClean() != '"') throw x.syntaxError("Expected a string key");
-                var key = x.nextString('"');
-                if (x.nextClean() != ':') throw x.syntaxError("Expected ':' after key");
-                map.put(key, parseOrdered(x));
-                c = x.nextClean();
-                if (c == '}') return map;
-                if (c != ',') throw x.syntaxError("Expected ',' or '}'");
-            }
-        }
-        if (c == '[') {
-            var list = new ArrayList<Object>();
-            if (x.nextClean() == ']') return list;
-            x.back();
-            while (true) {
-                list.add(parseOrdered(x));
-                c = x.nextClean();
-                if (c == ']') return list;
-                if (c != ',') throw x.syntaxError("Expected ',' or ']'");
-            }
-        }
-        if (c == '"') return x.nextString('"');
-        var token = new StringBuilder();
-        for (; c != 0 && ",:]} \t\n\r".indexOf(c) < 0; c = x.next()) token.append(c);
-        if (c != 0) x.back();
-        return jsonScalar(token.toString(), x);
-    }
-
-    private static final Pattern JSON_NUMBER =
-            Pattern.compile("-?+(?:0|[1-9]\\d*+)(\\.\\d++)?+([eE][+-]?+\\d++)?+");
-
-    /**
-     * A JSON literal or number. Integer literals keep org.json's types ({@code Integer}, else
-     * {@code Long}); anything else becomes the nearest {@code Double}, as in JS.
-     */
-    private static Object jsonScalar(String token, JSONTokener x) {
-        switch (token) {
-            case "true":  return Boolean.TRUE;
-            case "false": return Boolean.FALSE;
-            case "null":  return null;
-            default:      break;
-        }
-        var m = JSON_NUMBER.matcher(token);
-        if (!m.matches()) {
-            throw x.syntaxError("Unexpected token '" + token.substring(0, Math.min(token.length(), 32)) + "'");
-        }
-        if (m.group(1) == null && m.group(2) == null && token.length() <= 20) {
-            try {
-                var l = Long.parseLong(token);
-                if (l == (int) l) return (int) l;
-                return l;
-            } catch (NumberFormatException beyondLong) {
-                // falls through to the nearest double
-            }
-        }
-        return Double.parseDouble(token);
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, Object> asObject(Object value, String name) {
-        if (!(value instanceof Map<?, ?>)) throw new JSONException("\"" + name + "\" is not a JSON object");
-        return (Map<String, Object>) value;
-    }
-
-    /** A required string field, like org.json {@code getString}. */
-    private static String requiredString(Map<String, Object> map, String key) {
-        if (map.get(key) instanceof String s) return s;
-        throw new JSONException("\"" + key + "\" is not a string");
-    }
-
-    /** An optional field as a string, like org.json {@code optString(key, null)}. */
-    private static String optionalString(Map<String, Object> map, String key) {
-        var value = map.get(key);
-        return value == null ? null : value.toString();
-    }
-
-    /** A required numeric field, like org.json {@code getInt}/{@code getLong}/{@code getDouble}: a number or a numeric string. */
-    private static <T> T requiredNumber(Map<String, Object> map, String key,
-            Function<String, T> parse, Function<Number, T> convert) {
-        var value = map.get(key);
-        if (value instanceof Number n) return convert.apply(n);
-        if (value == null) throw new JSONException("\"" + key + "\" not found");
-        try {
-            return parse.apply(value.toString());
-        } catch (NumberFormatException e) {
-            throw new JSONException("\"" + key + "\" is not a number", e);
-        }
     }
 
     /** A parsed JSON number as JS holds it: {@code Long} for integer literals, otherwise the nearest {@code Double}. */

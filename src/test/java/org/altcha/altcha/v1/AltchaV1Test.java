@@ -3,6 +3,8 @@ package org.altcha.altcha.v1;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Base64;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -148,6 +150,26 @@ public class AltchaV1Test {
         var base64 = java.util.Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
 
         assertTrue(Altcha.verifySolution(base64, "secret", false));
+    }
+
+    @Test
+    public void testBase64PayloadNumbersParseInLinearTime() throws Exception {
+        // Unauthenticated input: org.json's BigInteger/BigDecimal parsing took ~10 s per call here.
+        var digits = "1".repeat(1_000_000);
+        var challenge = Altcha.createChallenge(new Altcha.ChallengeOptions().number(5L).hmacKey("secret"));
+        var solution = String.format(
+                "{\"algorithm\":\"%s\",\"challenge\":\"%s\",\"number\":5,\"salt\":\"%s\",\"signature\":\"%s\",\"x\":%s}",
+                challenge.algorithm(), challenge.challenge(), challenge.salt(), challenge.signature(), digits);
+        var server = "{\"algorithm\":\"SHA-256\",\"verificationData\":\"verified=true\",\"signature\":\"00\","
+                + "\"verified\":true,\"x\":" + digits + "}";
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            assertTrue(Altcha.verifySolution(b64(solution), "secret", false));
+            assertFalse(Altcha.verifyServerSignature(b64(server), "secret").verified());
+        });
+    }
+
+    private static String b64(String json) {
+        return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
     }
 
     @Test
