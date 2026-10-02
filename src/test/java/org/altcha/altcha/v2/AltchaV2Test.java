@@ -1016,21 +1016,36 @@ public class AltchaV2Test {
 
     @Test
     public void testVerifyServerSignature() throws Exception {
-        var verData = "score=0.9&verified=true&location.countryCode=DE";
+        var payload = signedServerPayload("score=0.9&verified=true&location.countryCode=DE");
+        var result  = Altcha.verifyServerSignature(payload, HMAC_SECRET);
+
+        assertTrue(result.verified());
+        assertEquals("DE", result.verificationData().getAdditionalField("location.countryCode"));
+        assertEquals(0.9, result.verificationData().score(), 0.001);
+    }
+
+    private static Altcha.ServerSignaturePayload signedServerPayload(String verData) throws Exception {
         var md   = java.security.MessageDigest.getInstance("SHA-256");
         var hash = md.digest(verData.getBytes(StandardCharsets.UTF_8));
         var mac  = javax.crypto.Mac.getInstance("HmacSHA256");
         mac.init(new javax.crypto.spec.SecretKeySpec(
                 HMAC_SECRET.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         var sig  = Altcha.bytesToHex(mac.doFinal(hash));
+        return new Altcha.ServerSignaturePayload("SHA-256", null, null, verData, sig, true);
+    }
 
-        var payload = new Altcha.ServerSignaturePayload(
-                "SHA-256", null, null, verData, sig, true);
-        var result  = Altcha.verifyServerSignature(payload, HMAC_SECRET);
+    @Test
+    public void testVerifyServerSignatureExpireLikeJs() throws Exception {
+        // Keep the whole test within one wall-clock second.
+        var msIntoSecond = System.currentTimeMillis() % 1000;
+        if (msIntoSecond > 800) Thread.sleep(1000 - msIntoSecond);
+        var now = System.currentTimeMillis() / 1000;
 
-        assertTrue(result.verified());
-        assertEquals("DE", result.verificationData().getAdditionalField("location.countryCode"));
-        assertEquals(0.9, result.verificationData().score(), 0.001);
+        // JS: expired = !!expire && expire < Math.floor(Date.now() / 1000)
+        assertFalse(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + (now - 1)), HMAC_SECRET).verified());
+        assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + now), HMAC_SECRET).verified());
+        assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + (now + 60)), HMAC_SECRET).verified());
+        assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=0"), HMAC_SECRET).verified());
     }
 
     // -------------------------------------------------------------------------

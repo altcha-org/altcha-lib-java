@@ -792,9 +792,11 @@ public final class Altcha {
         var expectedSig = hmacHex(payload.algorithm(), hash, hmacKey);
         var verData     = extractVerificationData(payload.verificationData());
         var now         = System.currentTimeMillis() / 1000;
+        // JS: expired = !!expire && expire < Math.floor(Date.now() / 1000); 0 = no expiry, current second still valid
+        var expired     = verData.expire() != null && verData.expire() != 0 && verData.expire() < now;
         var verified    = payload.verified()
                 && verData.verified()
-                && (verData.expire() == null || verData.expire() > now)
+                && !expired
                 && payload.signature().equals(expectedSig);
         return new ServerSignatureVerification(verified, verData);
     }
