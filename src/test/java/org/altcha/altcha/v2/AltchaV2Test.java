@@ -183,6 +183,60 @@ public class AltchaV2Test {
         assertEquals(0x00, result[5] & 0xFF);
     }
 
+    @Test
+    public void testSolveChallengeStringCounterModeMatchesReference() throws Exception {
+        // altcha-lib v2 solveChallenge({counterMode: 'string'}) on the same parameters: counter 75 (uint32: 659)
+        var solution = Altcha.solveChallenge(fixedShaChallenge("00"), Altcha.kdf("SHA-256"), 0, 1,
+                Altcha.DEFAULT_SOLVE_TIMEOUT, Altcha.CounterMode.STRING);
+
+        assertEquals(75, solution.counter());
+        assertEquals("00d2a8712179b4a90049aaf61cc3af55c37bfba5856d436604b11f053245f131", solution.derivedKey());
+    }
+
+    @Test
+    public void testCreateChallengeMergesKdfParametersAndUsesCounterMode() throws Exception {
+        var sha = Altcha.kdf("SHA-256");
+        Altcha.KeyDerivationFunction merging = (p, salt, password) -> new Altcha.DeriveKeyResult(
+                sha.deriveKey(p, salt, password).derivedKey(),
+                new Altcha.ChallengeParameters(p.algorithm(), p.nonce(), p.salt(), p.cost(), p.keyLength(),
+                        p.keyPrefix(), p.keySignature(), 1024, 2, p.expiresAt(), p.data()));
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(1)
+                .counter(7)
+                .counterMode(Altcha.CounterMode.STRING)
+                .deriveKey(merging)
+                .hmacSignatureSecret(HMAC_SECRET)
+                .hmacKeySignatureSecret("key-signing-secret"));
+
+        assertEquals(1024, challenge.parameters().memoryCost());
+        assertEquals(2, challenge.parameters().parallelism());
+        var solution = Altcha.solveChallenge(challenge, sha, 0, 1, null, Altcha.CounterMode.STRING);
+        assertEquals(7, solution.counter());
+        // Merged parameters are signed; both verify paths accept the solution.
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, null, null,
+                Altcha.CounterMode.STRING, sha).verified());
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, "key-signing-secret", sha).verified());
+    }
+
+    @Test
+    public void testVerifyJsCreatedStringModeChallengeWithMergedParameters() throws Exception {
+        // Created with altcha-lib (JS) v2: createChallenge({algorithm: 'SHA-256', cost: 1, counter: 7,
+        // counterMode: 'string', hmacSignatureSecret: HMAC_SECRET, deriveKey: sha.deriveKey wrapped to return
+        // parameters {memoryCost: 1024, parallelism: 2}}), then solveChallenge({counterMode: 'string'}).
+        var payload = "eyJjaGFsbGVuZ2UiOnsicGFyYW1ldGVycyI6eyJhbGdvcml0aG0iOiJTSEEtMjU2IiwiY29zdCI6MSwia2V5TGVuZ3RoIjozMiwia2V5UHJlZml4IjoiNDExYjA3MGRmZDdmNjQzYzlkZTQwYmFiYzgyYTMzYWIiLCJtZW1vcnlDb3N0IjoxMDI0LCJub25jZSI6ImEwZWUyZjRkMjk1NTkzYTdjMzY1YTU2YjhkODFkNmEyIiwicGFyYWxsZWxpc20iOjIsInNhbHQiOiI4NGQwMzQ5ZDA0ZWFlMWVjYjBlYmJmYTQ4NWE3M2I1MiJ9LCJzaWduYXR1cmUiOiJkOTg3OTE5YjU2MzhiMTk5ZTljMDU1ZDg3MTJhMmQxMDY4MzZiZjQ3N2ZjMDQ1NTVlM2E2NTc1NmViYmRlNDUwIn0sInNvbHV0aW9uIjp7ImNvdW50ZXIiOjcsImRlcml2ZWRLZXkiOiI0MTFiMDcwZGZkN2Y2NDNjOWRlNDBiYWJjODJhMzNhYmYwNTkyNGRlOGRkYjM4ZDY4MGJmODI0YWY0ZGQ3NjkxIiwidGltZSI6MH19";
+        var p   = Altcha.parsePayload(payload);
+        var kdf = Altcha.kdf("SHA-256");
+
+        var stringMode = Altcha.verifySolution(p.challenge(), p.solution(), HMAC_SECRET, null, null,
+                Altcha.CounterMode.STRING, kdf);
+        var uint32Mode = Altcha.verifySolution(p.challenge(), p.solution(), HMAC_SECRET, kdf);
+
+        assertTrue(stringMode.verified());
+        assertFalse(uint32Mode.verified());   // same as JS without counterMode: 'string'
+        assertTrue(uint32Mode.invalidSolution());
+    }
+
     // -------------------------------------------------------------------------
     // PBKDF2 raw-bytes correctness
     // -------------------------------------------------------------------------

@@ -180,6 +180,19 @@ var options = new Altcha.CreateChallengeOptions()
         .hmacSignatureSecret("secret");
 ```
 
+A KDF can also return updated parameters, e.g. defaults it picked:
+`new Altcha.DeriveKeyResult(dk, updatedParams)`. In deterministic mode (`counter` set) `createChallenge` uses them in place of the challenge parameters before computing `keyPrefix` and signing, like the JavaScript library. Solve and verify ignore them.
+
+### Counter mode
+
+By default the counter is appended to the nonce as a big-endian 32-bit integer (`CounterMode.UINT32`). `CounterMode.STRING` appends its decimal digits instead, for compatibility with the JavaScript library's `counterMode: 'string'`. The mode is not part of the signed challenge, so creator, solver and verifier must use the same one:
+
+```java
+options.counterMode(Altcha.CounterMode.STRING);
+var solution = Altcha.solveChallenge(challenge, kdf, 0, 1, Altcha.DEFAULT_SOLVE_TIMEOUT, Altcha.CounterMode.STRING);
+var result   = Altcha.verifySolution(challenge, solution, "secret", null, null, Altcha.CounterMode.STRING, kdf);
+```
+
 ### Fields hash (ALTCHA Sentinel)
 
 ```java
@@ -208,10 +221,12 @@ if (result.verified()) {
 | `solveChallenge(Challenge, KeyDerivationFunction)` | `Solution` | Brute-forces a solution (counter start=0, step=1, 90 s timeout; `null` on timeout) |
 | `solveChallenge(Challenge, KeyDerivationFunction, long, long)` | `Solution` | Brute-forces a solution with custom start/step (90 s timeout) |
 | `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration)` | `Solution` | Same, with a custom timeout (`null`/zero = none) |
+| `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration, CounterMode)` | `Solution` | Same, with a counter mode (`null` = `UINT32`) |
 | `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
 | `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
 | `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (`SHA-256`/`SHA-384`/`SHA-512`; `null` = `SHA-256`) for challenges created with `hmacAlgorithm` |
+| `verifySolution(Challenge, Solution, String, String, String, CounterMode, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with a counter mode (`null` = `UINT32`) |
 | `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
 | `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |
 | `verifyFieldsHash(Map<String,String>, String[], String, String)` | `boolean` | Verifies a Sentinel fields hash |
@@ -237,8 +252,9 @@ if (result.verified()) {
 | `ServerSignatureVerification` | record | Sentinel verification result: `verified`, `verificationData` |
 | `ServerSignatureVerificationData` | record | Parsed Sentinel data: `score`, `classification`, `email`, `expire`, `fields`, … |
 | `KeyDerivationFunction` | functional interface | Pluggable KDF: `deriveKey(ChallengeParameters, byte[] salt, byte[] password)` |
-| `DeriveKeyResult` | record | Wraps the `derivedKey` byte array returned by a KDF |
-| `PasswordBuffer` | class | Combines nonce + counter into a reusable byte array for KDF iterations |
+| `DeriveKeyResult` | record | `derivedKey` returned by a KDF, plus optional `parameters` merged into the challenge by `createChallenge` |
+| `CounterMode` | enum | Counter encoding in the KDF password: `UINT32` (default) or `STRING` |
+| `PasswordBuffer` | class | Combines nonce + counter into the KDF password for each iteration |
 
 ---
 

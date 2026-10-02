@@ -222,8 +222,20 @@ public final class Altcha {
     // Key derivation interface
     // -------------------------------------------------------------------------
 
-    /** Result returned by a {@link KeyDerivationFunction}. */
-    public record DeriveKeyResult(byte[] derivedKey) {}
+    /**
+     * Result returned by a {@link KeyDerivationFunction}.
+     *
+     * <p>{@code parameters} is optional. When non-null, {@link #createChallenge} uses it in place
+     * of the challenge parameters before computing the key prefix and signing, so a KDF can
+     * add or adjust signed parameters (like JS {@code Object.assign(parameters, result.parameters)}).
+     * Return the parameters you received with the fields you want changed. Solve and verify
+     * ignore it, as in JS.</p>
+     */
+    public record DeriveKeyResult(byte[] derivedKey, ChallengeParameters parameters) {
+        public DeriveKeyResult(byte[] derivedKey) {
+            this(derivedKey, null);
+        }
+    }
 
     /**
      * Pluggable key derivation function.
@@ -241,25 +253,49 @@ public final class Altcha {
     // -------------------------------------------------------------------------
 
     /**
+     * How the counter is appended to the nonce to form the KDF password. Not signed: creator,
+     * solver and verifier must use the same mode.
+     */
+    public enum CounterMode {
+        /** Big-endian 32-bit unsigned integer (v2 default). */
+        UINT32,
+        /** Decimal string, UTF-8 encoded, like JS {@code counter.toString()} (v1 compatibility). */
+        STRING
+    }
+
+    /**
      * Manages the password buffer passed to the KDF for each counter iteration.
      *
-     * <p>The counter is appended to the nonce as a big-endian 32-bit unsigned integer
-     * (its low 32 bits, like JS {@code DataView.setUint32}). The returned array from
-     * {@link #setCounter} is a view of an internal buffer – do not retain a reference
-     * across iterations.</p>
+     * <p>In {@link CounterMode#UINT32} mode the counter is appended to the nonce as a
+     * big-endian 32-bit unsigned integer (its low 32 bits, like JS {@code DataView.setUint32}),
+     * and the returned array from {@link #setCounter} is a view of an internal buffer – do not
+     * retain a reference across iterations. In {@link CounterMode#STRING} mode the nonce is
+     * followed by the counter's decimal digits and each call returns a new array.</p>
      */
     public static final class PasswordBuffer {
         private final byte[] nonce;
         private final byte[] buffer;
+        private final CounterMode mode;
 
         public PasswordBuffer(byte[] nonce) {
-            this.nonce  = nonce;
-            this.buffer = new byte[nonce.length + 4];
-            System.arraycopy(nonce, 0, buffer, 0, nonce.length);
+            this(nonce, CounterMode.UINT32);
         }
 
-        /** Updates the counter bytes in-place and returns the combined nonce+counter buffer. */
+        /** {@code mode} {@code null} means {@link CounterMode#UINT32}. */
+        public PasswordBuffer(byte[] nonce, CounterMode mode) {
+            this.nonce  = nonce;
+            this.mode   = mode != null ? mode : CounterMode.UINT32;
+            this.buffer = this.mode == CounterMode.UINT32 ? Arrays.copyOf(nonce, nonce.length + 4) : null;
+        }
+
+        /** Returns the nonce+counter password for counter {@code n}. */
         public byte[] setCounter(long n) {
+            if (mode == CounterMode.STRING) {
+                var digits = jsNumber(n);  // JS Number#toString; ASCII only
+                var out    = Arrays.copyOf(nonce, nonce.length + digits.length());
+                for (var i = 0; i < digits.length(); i++) out[nonce.length + i] = (byte) digits.charAt(i);
+                return out;
+            }
             buffer[nonce.length]     = (byte) (n >>> 24);
             buffer[nonce.length + 1] = (byte) (n >>> 16);
             buffer[nonce.length + 2] = (byte) (n >>> 8);
@@ -275,6 +311,7 @@ public final class Altcha {
     public static final class CreateChallengeOptions {
         public String algorithm;
         public Long counter;
+        public CounterMode counterMode = CounterMode.UINT32;
         public int cost;
         public Map<String, Object> data;
         public KeyDerivationFunction deriveKey;
@@ -290,6 +327,7 @@ public final class Altcha {
 
         public CreateChallengeOptions algorithm(String v)                  { algorithm = v; return this; }
         public CreateChallengeOptions counter(long v)                      { counter = v; return this; }
+        public CreateChallengeOptions counterMode(CounterMode v)           { counterMode = v; return this; }
         public CreateChallengeOptions cost(int v)                          { cost = v; return this; }
         public CreateChallengeOptions data(Map<String, Object> v)          { data = v; return this; }
         public CreateChallengeOptions deriveKey(KeyDerivationFunction v)   { deriveKey = v; return this; }
@@ -364,8 +402,9 @@ public final class Altcha {
      * Creates a new v2 proof-of-work challenge.
      *
      * <p>If {@link CreateChallengeOptions#counter} is set, the KDF is invoked once
-     * and the first {@code keyPrefixLength} bytes of the derived key become the
-     * {@code keyPrefix} (deterministic mode). Otherwise a static prefix (default
+     * (with {@link CreateChallengeOptions#counterMode}), parameters it returns replace the
+     * challenge parameters, and the first {@code keyPrefixLength} bytes of the derived key
+     * become the {@code keyPrefix} (deterministic mode). Otherwise a static prefix (default
      * {@code "00"}) is used and the client must brute-force the counter.</p>
      *
      * <p>If {@link CreateChallengeOptions#hmacSignatureSecret} is set (non-empty), the
@@ -396,9 +435,10 @@ public final class Altcha {
             var kdfFn    = options.deriveKey != null ? options.deriveKey : kdf(options.algorithm);
             var nonceBuf = hexToBytes(nonce);
             var saltBuf  = hexToBytes(salt);
-            var pw       = new PasswordBuffer(nonceBuf);
+            var pw       = new PasswordBuffer(nonceBuf, options.counterMode);
             var result   = kdfFn.deriveKey(params, saltBuf, pw.setCounter(options.counter));
             derivedKey   = result.derivedKey();
+            if (result.parameters() != null) params = result.parameters();
             params       = params.withKeyPrefix(bytesToHex(jsSlice(derivedKey, prefixLength)));
         }
 
@@ -439,17 +479,19 @@ public final class Altcha {
      * @param counterStart starting counter value (0 for a fresh solve)
      * @param counterStep  increment between attempts (1 for single-threaded)
      * @param timeout      maximum solving time; {@code null} or zero means no timeout
+     * @param counterMode  counter encoding; must match the creator's ({@code null} means
+     *                     {@link CounterMode#UINT32})
      * @return the solution, or {@code null} if the timeout elapsed first
      * @throws InterruptedException if the calling thread is interrupted
      */
     public static Solution solveChallenge(Challenge challenge, KeyDerivationFunction kdfFn,
-            long counterStart, long counterStep, Duration timeout) throws Exception {
+            long counterStart, long counterStep, Duration timeout, CounterMode counterMode) throws Exception {
         var params        = challenge.parameters();
         var nonceBuf      = hexToBytes(params.nonce());
         var saltBuf       = hexToBytes(params.salt());
         var keyPrefix     = params.keyPrefix();
         var keyPrefixBuf  = keyPrefixBytes(keyPrefix);
-        var pw            = new PasswordBuffer(nonceBuf);
+        var pw            = new PasswordBuffer(nonceBuf, counterMode);
         var timeoutNanos  = timeout == null ? 0 : TimeUnit.NANOSECONDS.convert(timeout);
         var t0            = System.nanoTime();
         var counter       = counterStart;
@@ -464,6 +506,12 @@ public final class Altcha {
             }
             counter += counterStep;
         }
+    }
+
+    /** Solves with {@link CounterMode#UINT32}; returns {@code null} on timeout. */
+    public static Solution solveChallenge(Challenge challenge, KeyDerivationFunction kdfFn,
+            long counterStart, long counterStep, Duration timeout) throws Exception {
+        return solveChallenge(challenge, kdfFn, counterStart, counterStep, timeout, CounterMode.UINT32);
     }
 
     /** Solves with custom start/step and {@link #DEFAULT_SOLVE_TIMEOUT}; returns {@code null} on timeout. */
@@ -500,6 +548,8 @@ public final class Altcha {
      * @param hmacAlgorithm           HMAC algorithm used when the challenge was signed
      *                                ({@code "SHA-256"}, {@code "SHA-384"} or {@code "SHA-512"});
      *                                {@code null} means {@link #DEFAULT_HMAC_ALGORITHM}
+     * @param counterMode             counter encoding used when re-deriving; must match the
+     *                                creator's ({@code null} means {@link CounterMode#UINT32})
      * @param kdfFn                   KDF to use when re-deriving (may be {@code null} if
      *                                {@code keySignature} is present)
      */
@@ -509,6 +559,7 @@ public final class Altcha {
             String hmacSignatureSecret,
             String hmacKeySignatureSecret,
             String hmacAlgorithm,
+            CounterMode counterMode,
             KeyDerivationFunction kdfFn) throws Exception {
 
         if (!isSet(hmacSignatureSecret)) {
@@ -560,12 +611,21 @@ public final class Altcha {
         }
         var nonceBuf = hexToBytes(params.nonce());
         var saltBuf  = hexToBytes(params.salt());
-        var pw       = new PasswordBuffer(nonceBuf);
+        var pw       = new PasswordBuffer(nonceBuf, counterMode);
         var derivedKey    = kdfFn.deriveKey(params, saltBuf, pw.setCounter(solution.counter())).derivedKey();
         var keyMatches    = constantTimeEqual(bytesToHex(derivedKey), solution.derivedKey());
         var prefixMatches = keyPrefixMatches(derivedKey, params.keyPrefix(), keyPrefixBytes(params.keyPrefix()));
         var valid         = keyMatches && prefixMatches;
         return new VerifySolutionResult(valid, false, false, !valid, elapsed(t0));
+    }
+
+    /** Verifies with {@link CounterMode#UINT32}. */
+    public static VerifySolutionResult verifySolution(
+            Challenge challenge, Solution solution,
+            String hmacSignatureSecret, String hmacKeySignatureSecret,
+            String hmacAlgorithm, KeyDerivationFunction kdfFn) throws Exception {
+        return verifySolution(challenge, solution, hmacSignatureSecret, hmacKeySignatureSecret,
+                hmacAlgorithm, CounterMode.UINT32, kdfFn);
     }
 
     /** Convenience overload using {@link #DEFAULT_HMAC_ALGORITHM}. */
