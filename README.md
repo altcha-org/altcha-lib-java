@@ -206,9 +206,14 @@ Altcha.ServerSignatureVerification result =
         Altcha.verifyServerSignature(base64Payload, "secret");
 
 if (result.verified()) {
-    double score = result.verificationData().score();
+    var data     = result.verificationData();
+    Number score = data.score();                        // null if absent
+    var reasons  = data.reasons();                      // empty list if none
+    var country  = data.get("location.countryCode");    // any field, typed like JS
 }
 ```
+
+Verification data is parsed like the JavaScript library's `parseVerificationData`: `true`/`false` become `Boolean`, integers `Long`, decimals `Double`, everything else a trimmed `String`; non-empty `fields`/`reasons` become a `List<String>`. `result.toJson()` has the same fields as the JavaScript result (`expired`, `invalidSignature`, `invalidSolution`, `time`, `verificationData`, `verified`).
 
 ### v2 API reference
 
@@ -250,8 +255,8 @@ if (result.verified()) {
 | `Payload` | record | Full client submission: `challenge` + `solution` |
 | `VerifySolutionResult` | record | Verification outcome: `verified`, `expired`, `invalidSignature`, `invalidSolution` (`null` when not checked), `time` (ms, 1 decimal); `toJson()` matches the JS result |
 | `ServerSignaturePayload` | record | Raw Sentinel attestation payload |
-| `ServerSignatureVerification` | record | Sentinel verification result: `verified`, `verificationData` |
-| `ServerSignatureVerificationData` | record | Parsed Sentinel data: `score`, `classification`, `email`, `expire`, `fields`, … |
+| `ServerSignatureVerification` | record | Sentinel verification result: `verified`, `expired`, `invalidSignature`, `invalidSolution`, `time`, `verificationData`; `toJson()` matches the JS result |
+| `ServerSignatureVerificationData` | record | Parsed Sentinel data: `values()` (all fields, JS-typed), `get(name)`, and typed accessors `score`, `classification`, `email`, `expire`, `fields`, `reasons`, … |
 | `KeyDerivationFunction` | functional interface | Pluggable KDF: `deriveKey(ChallengeParameters, byte[] salt, byte[] password)` |
 | `DeriveKeyResult` | record | `derivedKey` returned by a KDF, plus optional `parameters` merged into the challenge by `createChallenge` |
 | `CounterMode` | enum | Counter encoding in the KDF password: `UINT32` (default) or `STRING` |

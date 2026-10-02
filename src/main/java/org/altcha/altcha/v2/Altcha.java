@@ -3,6 +3,7 @@ package org.altcha.altcha.v2;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.math.MathContext;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
@@ -11,6 +12,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -144,75 +146,77 @@ public final class Altcha {
             String signature,
             boolean verified) {}
 
-    /** Result of verifying a server-attestation payload. */
+    /** Result of verifying a server-attestation payload, with the same fields as the JS result. */
     public record ServerSignatureVerification(
             boolean verified,
-            ServerSignatureVerificationData verificationData) {
+            boolean expired,
+            boolean invalidSignature,
+            boolean invalidSolution,
+            double time,                                         // ms, 1 decimal
+            ServerSignatureVerificationData verificationData) { // null if the payload was incomplete
 
-        /** Serialises this result to a JSON object string. */
+        /** Serialises this result to a JSON object string, matching the JS result. */
         public String toJson() {
-            var sb = new StringBuilder("{");
-            sb.append("\"verified\":").append(verified);
-            if (verificationData != null) sb.append(",\"verificationData\":").append(verificationData.toJson());
-            return sb.append('}').toString();
+            return "{\"expired\":" + expired
+                    + ",\"invalidSignature\":" + invalidSignature
+                    + ",\"invalidSolution\":" + invalidSolution
+                    + ",\"time\":" + jsNumber(time)
+                    + ",\"verificationData\":" + (verificationData != null ? verificationData.toJson() : "null")
+                    + ",\"verified\":" + verified + "}";
         }
     }
 
-    /** Parsed verification data from the ALTCHA Sentinel service. */
-    public record ServerSignatureVerificationData(
-            String classification,
-            String email,
-            Long expire,
-            String[] fields,
-            String fieldsHash,
-            String ipAddress,
-            String[] reasons,
-            double score,
-            long time,
-            boolean verified,
-            Map<String, String> additionalFields) {
+    /**
+     * Verification data from the ALTCHA Sentinel service, parsed and typed like JS
+     * {@code parseVerificationData}: {@code true}/{@code false} → {@code Boolean}; digits →
+     * {@code Long} ({@code Double} beyond 15 digits); digits.digits → {@code Double}; anything
+     * else → trimmed {@code String}, except non-empty {@code fields}/{@code reasons} →
+     * {@code List<String>}. {@link #values()} holds every entry, in JS property order.
+     */
+    public record ServerSignatureVerificationData(Map<String, Object> values) {
 
-        public String getAdditionalField(String name) {
-            return additionalFields.get(name);
-        }
+        /** The parsed value of {@code name}, or {@code null} if absent. */
+        public Object get(String name)  { return values.get(name); }
 
-        public boolean hasAdditionalField(String name) {
-            return additionalFields.containsKey(name);
-        }
+        public String classification()  { return string("classification"); }
+        public String email()           { return string("email"); }
+        public String fieldsHash()      { return string("fieldsHash"); }
+        public String id()              { return string("id"); }
+        public String ipAddress()       { return string("ipAddress"); }
+        /** {@code null} if absent or not a number. */
+        public Number expire()          { return number("expire"); }
+        /** {@code null} if absent or not a number. */
+        public Number score()           { return number("score"); }
+        /** {@code null} if absent or not a number. */
+        public Number time()            { return number("time"); }
+        /** {@code true} only for {@code verified=true}. */
+        public boolean verified()       { return Boolean.TRUE.equals(values.get("verified")); }
+        /** Empty if absent or empty. */
+        public List<String> fields()    { return list("fields"); }
+        /** Empty if absent or empty. */
+        public List<String> reasons()   { return list("reasons"); }
 
-        /** Serialises this verification data to a JSON object string. */
+        /** Serialises the data like JS {@code JSON.stringify(parseVerificationData(…))}. */
         public String toJson() {
-            var sb = new StringBuilder("{");
-            var first = true;
-            if (classification != null) { sb.append("\"classification\":").append(jsonString(classification)); first = false; }
-            if (email          != null) { if (!first) sb.append(','); sb.append("\"email\":").append(jsonString(email)); first = false; }
-            if (expire         != null) { if (!first) sb.append(','); sb.append("\"expire\":").append(expire); first = false; }
-            if (fields         != null) {
-                if (!first) sb.append(',');
-                sb.append("\"fields\":[");
-                for (var i = 0; i < fields.length; i++) { if (i > 0) sb.append(','); sb.append(jsonString(fields[i])); }
-                sb.append(']');
-                first = false;
-            }
-            if (fieldsHash  != null) { if (!first) sb.append(','); sb.append("\"fieldsHash\":").append(jsonString(fieldsHash)); first = false; }
-            if (ipAddress   != null) { if (!first) sb.append(','); sb.append("\"ipAddress\":").append(jsonString(ipAddress)); first = false; }
-            if (reasons     != null) {
-                if (!first) sb.append(',');
-                sb.append("\"reasons\":[");
-                for (var i = 0; i < reasons.length; i++) { if (i > 0) sb.append(','); sb.append(jsonString(reasons[i])); }
-                sb.append(']');
-                first = false;
-            }
-            if (!first) sb.append(',');
-            sb.append("\"score\":").append(score).append(',');
-            sb.append("\"time\":").append(time).append(',');
-            sb.append("\"verified\":").append(verified);
-            if (additionalFields != null) {
-                for (var entry : new TreeMap<>(additionalFields).entrySet()) {
-                    sb.append(',').append(jsonString(entry.getKey())).append(':').append(jsonString(entry.getValue()));
-                }
-            }
-            return sb.append('}').toString();
+            var sb = new StringBuilder();
+            encodeValue(sb, values, false);
+            return sb.toString();
+        }
+
+        private String string(String name) {
+            var v = values.get(name);
+            return v == null ? null : v instanceof Number n ? jsNumber(n) : v.toString();
+        }
+
+        private Number number(String name) {
+            return values.get(name) instanceof Number n ? n : null;
+        }
+
+        @SuppressWarnings("unchecked")
+        private List<String> list(String name) {
+            var v = values.get(name);
+            if (v instanceof List<?> l) return (List<String>) l;
+            return v == null || "".equals(v) ? List.of() : List.of(string(name));
         }
     }
 
@@ -758,70 +762,237 @@ public final class Altcha {
     // Server signature verification (Sentinel service)
     // -------------------------------------------------------------------------
 
+    /**
+     * Verifies a Sentinel server-signature payload like JS {@code verifyServerSignature}.
+     * If {@code algorithm}, {@code verificationData} or {@code signature} is missing, returns a
+     * result with every check failed and no verification data.
+     */
     public static ServerSignatureVerification verifyServerSignature(
             ServerSignaturePayload payload, String hmacKey) throws Exception {
-        if (payload.algorithm() == null || payload.verificationData() == null
-                || payload.verificationData().isBlank() || payload.signature() == null) {
-            return new ServerSignatureVerification(false, null);
+        var t0 = System.nanoTime();
+        if (payload.algorithm() == null || payload.verificationData() == null || payload.signature() == null) {
+            return new ServerSignatureVerification(false, false, true, true, elapsed(t0), null);
         }
-        return verifyServerSignatureInternal(payload, hmacKey);
+        var hash      = MessageDigest.getInstance(webCryptoHash(payload.algorithm()))
+                .digest(utf8(payload.verificationData()));
+        var signature = hmacHex(payload.algorithm(), hash, hmacKey);
+        var verData   = parseVerificationData(payload.verificationData());
+        var expire    = verData.get("expire");
+        // JS: !!expire && expire < Math.floor(Date.now() / 1000), with JS truthiness and number coercion
+        var expired          = jsTruthy(expire) && jsToNumber(expire) < System.currentTimeMillis() / 1000;
+        var invalidSignature = !constantTimeEqual(payload.signature(), signature);
+        var invalidSolution  = !verData.verified() || !payload.verified();
+        return new ServerSignatureVerification(!expired && !invalidSignature && !invalidSolution,
+                expired, invalidSignature, invalidSolution, elapsed(t0), verData);
     }
 
+    /** Decodes and verifies a base64-encoded Sentinel server-signature payload. */
     public static ServerSignatureVerification verifyServerSignature(
             String base64Payload, String hmacKey) throws Exception {
         var json = new JSONObject(
                 new String(Base64.getDecoder().decode(base64Payload), StandardCharsets.UTF_8));
-        if (!json.has("algorithm") || !json.has("verificationData")
-                || !json.has("signature") || !json.has("verified")) {
-            return new ServerSignatureVerification(false, null);
-        }
-        var payload = new ServerSignaturePayload(
-                json.getString("algorithm"),
-                json.optString("apiKey", null),
-                json.optString("id", null),
-                json.getString("verificationData"),
-                json.getString("signature"),
-                json.getBoolean("verified"));
-        return verifyServerSignatureInternal(payload, hmacKey);
+        return verifyServerSignature(new ServerSignaturePayload(
+                stringField(json, "algorithm"),
+                stringField(json, "apiKey"),
+                stringField(json, "id"),
+                stringField(json, "verificationData"),
+                stringField(json, "signature"),
+                Boolean.TRUE.equals(json.opt("verified"))), hmacKey);
     }
 
-    private static ServerSignatureVerification verifyServerSignatureInternal(
-            ServerSignaturePayload payload, String hmacKey) throws Exception {
-        var digest      = MessageDigest.getInstance(payload.algorithm());
-        var hash        = digest.digest(payload.verificationData().getBytes(StandardCharsets.UTF_8));
-        var expectedSig = hmacHex(payload.algorithm(), hash, hmacKey);
-        var verData     = extractVerificationData(payload.verificationData());
-        var now         = System.currentTimeMillis() / 1000;
-        // JS: expired = !!expire && expire < Math.floor(Date.now() / 1000); 0 = no expiry, current second still valid
-        var expired     = verData.expire() != null && verData.expire() != 0 && verData.expire() < now;
-        var verified    = payload.verified()
-                && verData.verified()
-                && !expired
-                && payload.signature().equals(expectedSig);
-        return new ServerSignatureVerification(verified, verData);
+    private static String stringField(JSONObject json, String key) {
+        return json.opt(key) instanceof String s ? s : null;
     }
 
-    private static ServerSignatureVerificationData extractVerificationData(String raw)
-            throws Exception {
-        var params = parseQueryParams(raw);
-        var predefined = Set.of("classification", "email", "expire", "fields", "fieldsHash",
-                "ipAddress", "reasons", "score", "time", "verified");
-        var extra = new LinkedHashMap<String, String>();
-        for (var e : params.entrySet()) {
-            if (!predefined.contains(e.getKey())) extra.put(e.getKey(), e.getValue());
+    /**
+     * Parses Sentinel verification data like JS {@code parseVerificationData}: entries as
+     * {@code URLSearchParams} reads them (a duplicate key keeps its first position and last
+     * value), values typed as described in {@link ServerSignatureVerificationData}.
+     */
+    static ServerSignatureVerificationData parseVerificationData(String data) {
+        var values = new LinkedHashMap<String, Object>();
+        var start  = data.startsWith("?") ? 1 : 0;
+        while (start <= data.length()) {
+            var end = data.indexOf('&', start);
+            if (end < 0) end = data.length();
+            if (end > start) {
+                var eq    = data.indexOf('=', start);
+                var hasEq = eq >= 0 && eq < end;
+                var name  = formDecode(data, start, hasEq ? eq : end);
+                values.put(name, verificationValue(name, hasEq ? formDecode(data, eq + 1, end) : ""));
+            }
+            start = end + 1;
         }
-        return new ServerSignatureVerificationData(
-                params.get("classification"),
-                params.get("email"),
-                params.containsKey("expire") ? Long.parseLong(params.get("expire")) : null,
-                params.containsKey("fields")  ? params.get("fields").split(",")  : null,
-                params.get("fieldsHash"),
-                params.get("ipAddress"),
-                params.containsKey("reasons") ? params.get("reasons").split(",") : null,
-                params.containsKey("score")   ? Double.parseDouble(params.get("score")) : 0.0,
-                params.containsKey("time")    ? Long.parseLong(params.get("time")) : 0L,
-                Boolean.parseBoolean(params.getOrDefault("verified", "false")),
-                Collections.unmodifiableMap(extra));
+        var ordered = new LinkedHashMap<String, Object>();
+        for (var e : jsPropertyOrder(values, false)) ordered.put(e.getKey(), e.getValue());
+        return new ServerSignatureVerificationData(Collections.unmodifiableMap(ordered));
+    }
+
+    private static Object verificationValue(String name, String value) {
+        if (value.equals("true"))  return Boolean.TRUE;
+        if (value.equals("false")) return Boolean.FALSE;
+        if (isDigits(value, 0, value.length())) {
+            return value.length() <= 15 ? (Object) Long.parseLong(value) : (Object) Double.parseDouble(value);
+        }
+        var dot = value.indexOf('.');
+        if (dot > 0 && isDigits(value, 0, dot) && isDigits(value, dot + 1, value.length())) {
+            return Double.parseDouble(value);
+        }
+        var trimmed = jsTrim(value);
+        if ((name.equals("fields") || name.equals("reasons")) && !value.isEmpty()) {
+            return List.of(trimmed.split(",", -1));
+        }
+        return trimmed;
+    }
+
+    /** {@code true} if {@code s[from, to)} is non-empty and all ASCII digits (JS regex {@code \d+}). */
+    private static boolean isDigits(String s, int from, int to) {
+        if (from >= to) return false;
+        for (var i = from; i < to; i++) {
+            var c = s.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
+    /**
+     * application/x-www-form-urlencoded decoding of {@code s[from, to)} like {@code URLSearchParams}:
+     * {@code +} → space, valid {@code %XX} → byte, anything else kept; then
+     * {@link #decodeUtf8 WHATWG UTF-8 decode}.
+     */
+    private static String formDecode(String s, int from, int to) {
+        var in = utf8(s.substring(from, to));
+        var out = new byte[in.length];
+        var n = 0;
+        for (var i = 0; i < in.length; i++) {
+            var b = in[i];
+            int hi, lo;
+            if (b == '+') {
+                out[n++] = ' ';
+            } else if (b == '%' && i + 2 < in.length
+                    && (hi = Character.digit(in[i + 1], 16)) >= 0 && (lo = Character.digit(in[i + 2], 16)) >= 0) {
+                out[n++] = (byte) (hi << 4 | lo);
+                i += 2;
+            } else {
+                out[n++] = b;
+            }
+        }
+        return decodeUtf8(out, n);
+    }
+
+    /**
+     * WHATWG "UTF-8 decode": one U+FFFD per maximal invalid subsequence (Java's decoder may
+     * emit fewer, e.g. one for an encoded surrogate {@code ED A0 80}, where WHATWG emits three).
+     */
+    private static String decodeUtf8(byte[] bytes, int length) {
+        var sb = new StringBuilder(length);
+        int codePoint = 0, needed = 0, seen = 0, lower = 0x80, upper = 0xBF;
+        for (var i = 0; i < length; i++) {
+            var b = bytes[i] & 0xFF;
+            if (needed == 0) {
+                if (b <= 0x7F) {
+                    sb.append((char) b);
+                } else if (b >= 0xC2 && b <= 0xDF) {
+                    needed = 1; codePoint = b & 0x1F;
+                } else if (b >= 0xE0 && b <= 0xEF) {
+                    if (b == 0xE0) lower = 0xA0;
+                    if (b == 0xED) upper = 0x9F;
+                    needed = 2; codePoint = b & 0x0F;
+                } else if (b >= 0xF0 && b <= 0xF4) {
+                    if (b == 0xF0) lower = 0x90;
+                    if (b == 0xF4) upper = 0x8F;
+                    needed = 3; codePoint = b & 0x07;
+                } else {
+                    sb.append('\uFFFD');
+                }
+                continue;
+            }
+            if (b < lower || b > upper) {
+                codePoint = needed = seen = 0; lower = 0x80; upper = 0xBF;
+                sb.append('\uFFFD');
+                i--;  // reprocess this byte as a new sequence start
+                continue;
+            }
+            lower = 0x80; upper = 0xBF;
+            codePoint = codePoint << 6 | (b & 0x3F);
+            if (++seen == needed) {
+                sb.appendCodePoint(codePoint);
+                codePoint = needed = seen = 0;
+            }
+        }
+        if (needed != 0) sb.append('\uFFFD');
+        return sb.toString();
+    }
+
+    /** UTF-8 bytes like JS {@code TextEncoder}: lone surrogates become U+FFFD (Java would write {@code ?}). */
+    private static byte[] utf8(String s) {
+        StringBuilder sb = null;
+        for (var i = 0; i < s.length(); i++) {
+            var c    = s.charAt(i);
+            var pair = Character.isHighSurrogate(c) && i + 1 < s.length() && Character.isLowSurrogate(s.charAt(i + 1));
+            if (!pair && Character.isSurrogate(c)) {
+                if (sb == null) sb = new StringBuilder(s.length()).append(s, 0, i);
+                sb.append('\uFFFD');
+            } else {
+                if (sb != null) sb.append(c);
+                if (pair) {
+                    if (sb != null) sb.append(s.charAt(i + 1));
+                    i++;
+                }
+            }
+        }
+        return (sb == null ? s : sb.toString()).getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** JS {@code String.prototype.trim}. */
+    private static String jsTrim(String s) {
+        int from = 0, to = s.length();
+        while (from < to && isJsWhitespace(s.charAt(from))) from++;
+        while (to > from && isJsWhitespace(s.charAt(to - 1))) to--;
+        return s.substring(from, to);
+    }
+
+    /** ECMAScript WhiteSpace or LineTerminator. */
+    private static boolean isJsWhitespace(char c) {
+        return c == '\t' || c == '\n' || c == 0x0B || c == '\f' || c == '\r' || c == '\uFEFF'
+                || c == '\u2028' || c == '\u2029' || Character.getType(c) == Character.SPACE_SEPARATOR;
+    }
+
+    /** JS truthiness of a parsed verification value. */
+    private static boolean jsTruthy(Object v) {
+        if (v == null) return false;
+        if (v instanceof Boolean b) return b;
+        if (v instanceof Number n) return n.doubleValue() != 0 && !Double.isNaN(n.doubleValue());
+        if (v instanceof String s) return !s.isEmpty();
+        return true;
+    }
+
+    /** JS {@code ToNumber} of a parsed verification value (Boolean, Number or String). */
+    private static double jsToNumber(Object v) {
+        if (v instanceof Number n)  return n.doubleValue();
+        if (v instanceof Boolean b) return b ? 1 : 0;
+        if (v instanceof String s)  return jsStringToNumber(s);
+        return Double.NaN;
+    }
+
+    private static final Pattern JS_DECIMAL_LITERAL =
+            Pattern.compile("[+-]?(?:Infinity|(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)");
+    private static final Pattern JS_NON_DECIMAL_LITERAL =
+            Pattern.compile("0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)");
+
+    /** JS {@code StringToNumber}. */
+    private static double jsStringToNumber(String s) {
+        var t = jsTrim(s);
+        if (t.isEmpty()) return 0;
+        if (JS_DECIMAL_LITERAL.matcher(t).matches()) {
+            if (!t.endsWith("Infinity")) return Double.parseDouble(t);
+            return t.startsWith("-") ? Double.NEGATIVE_INFINITY : Double.POSITIVE_INFINITY;
+        }
+        if (JS_NON_DECIMAL_LITERAL.matcher(t).matches()) {
+            var radix = switch (Character.toLowerCase(t.charAt(1))) { case 'x' -> 16; case 'o' -> 8; default -> 2; };
+            return new BigInteger(t.substring(2), radix).doubleValue();
+        }
+        return Double.NaN;
     }
 
     // -------------------------------------------------------------------------
@@ -1079,19 +1250,22 @@ public final class Altcha {
     }
 
     /**
-     * HMAC as WebCrypto does it: {@code SHA-1}, {@code SHA-256}, {@code SHA-384} or {@code SHA-512}
+     * WebCrypto hash name: {@code SHA-1}, {@code SHA-256}, {@code SHA-384} or {@code SHA-512}
      * (case-insensitive); any other name throws, as in JS.
      */
-    static String hmacHex(String algorithm, byte[] data, String key) throws Exception {
-        var hmacName = switch (algorithm == null ? "" : algorithm.toUpperCase(Locale.ROOT)) {
-            case "SHA-1"   -> "HmacSHA1";
-            case "SHA-256" -> "HmacSHA256";
-            case "SHA-384" -> "HmacSHA384";
-            case "SHA-512" -> "HmacSHA512";
-            default        -> throw new IllegalArgumentException("Unsupported HMAC algorithm: " + algorithm);
+    private static String webCryptoHash(String algorithm) {
+        var name = algorithm == null ? "" : algorithm.toUpperCase(Locale.ROOT);
+        return switch (name) {
+            case "SHA-1", "SHA-256", "SHA-384", "SHA-512" -> name;
+            default -> throw new IllegalArgumentException("Unsupported hash algorithm: " + algorithm);
         };
+    }
+
+    /** HMAC as WebCrypto does it; the algorithm is a {@link #webCryptoHash WebCrypto hash name}. */
+    static String hmacHex(String algorithm, byte[] data, String key) throws Exception {
+        var hmacName = "Hmac" + webCryptoHash(algorithm).replace("-", "");
         var mac = Mac.getInstance(hmacName);
-        mac.init(new SecretKeySpec(key.getBytes(StandardCharsets.UTF_8), hmacName));
+        mac.init(new SecretKeySpec(utf8(key), hmacName));
         return bytesToHex(mac.doFinal(data));
     }
 
@@ -1219,20 +1393,5 @@ public final class Altcha {
         if (value instanceof Integer || value instanceof Long) return ((Number) value).longValue();
         if (value instanceof Number n) return n.doubleValue();
         throw new JSONException("\"" + name + "\" is not a number");
-    }
-
-    private static Map<String, String> parseQueryParams(String raw) throws Exception {
-        var result   = new LinkedHashMap<String, String>();
-        // Use the segment after the last '?' if present; otherwise parse the whole string.
-        var parts    = raw.split("\\?");
-        var paramStr = parts[parts.length - 1];
-        for (var pair : paramStr.split("&")) {
-            var kv = pair.split("=", 2);
-            if (kv.length == 2) {
-                result.put(java.net.URLDecoder.decode(kv[0], StandardCharsets.UTF_8),
-                           java.net.URLDecoder.decode(kv[1], StandardCharsets.UTF_8));
-            }
-        }
-        return result;
     }
 }

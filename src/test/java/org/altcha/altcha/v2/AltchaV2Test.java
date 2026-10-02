@@ -1037,8 +1037,67 @@ public class AltchaV2Test {
         var result  = Altcha.verifyServerSignature(payload, HMAC_SECRET);
 
         assertTrue(result.verified());
-        assertEquals("DE", result.verificationData().getAdditionalField("location.countryCode"));
-        assertEquals(0.9, result.verificationData().score(), 0.001);
+        assertEquals("DE", result.verificationData().get("location.countryCode"));
+        assertEquals(0.9, result.verificationData().score().doubleValue());
+    }
+
+    @Test
+    public void testParseSentinelVerificationDataLikeJs() {
+        // Real verificationData from ALTCHA Sentinel; expected: altcha-lib parseVerificationData + JSON.stringify
+        var data = Altcha.parseVerificationData("location.countryCode=id&location.score=0&location.timeZone=Asia%2FMakassar"
+                + "&location.triggeredRules=&id=1k3tet87i00b0lhjm0j&classification=GOOD&challengeAlgorithm=PBKDF2%2FSHA-256"
+                + "&device.browser=Firefox&device.edk=f359ed9ca9c06d6cd4e55cea0e87748a&device.type=desktop&expire=1790917537"
+                + "&ipAddress=104.28.215.132&penalty=0&origin=https%3A%2F%2Fplayground.altcha.org&reasons=&score=0"
+                + "&time=1790916339&verified=true");
+
+        assertEquals("{\"location.countryCode\":\"id\",\"location.score\":0,\"location.timeZone\":\"Asia/Makassar\","
+                + "\"location.triggeredRules\":\"\",\"id\":\"1k3tet87i00b0lhjm0j\",\"classification\":\"GOOD\","
+                + "\"challengeAlgorithm\":\"PBKDF2/SHA-256\",\"device.browser\":\"Firefox\","
+                + "\"device.edk\":\"f359ed9ca9c06d6cd4e55cea0e87748a\",\"device.type\":\"desktop\",\"expire\":1790917537,"
+                + "\"ipAddress\":\"104.28.215.132\",\"penalty\":0,\"origin\":\"https://playground.altcha.org\","
+                + "\"reasons\":\"\",\"score\":0,\"time\":1790916339,\"verified\":true}", data.toJson());
+        assertEquals(List.of(), data.reasons());
+        assertEquals(1790917537L, data.expire());
+        assertEquals("GOOD", data.classification());
+        assertTrue(data.verified());
+    }
+
+    @Test
+    public void testParseVerificationDataEdgeCasesLikeJs() {
+        var data = Altcha.parseVerificationData("?b=1&b=2&flag&c=%zz%E9&d=+x%20&fields=a,b,&reasons=%20&n=1.50"
+                + "&big=123456789012345678901&2=two&t=true&f=FALSE&x=1.&y=.5&&=empty");
+
+        // Expected: altcha-lib parseVerificationData + JSON.stringify (node 24)
+        assertEquals("{\"2\":\"two\",\"b\":2,\"flag\":\"\",\"c\":\"%zz\uFFFD\",\"d\":\"x\",\"fields\":[\"a\",\"b\",\"\"],"
+                + "\"reasons\":[\"\"],\"n\":1.5,\"big\":123456789012345680000,\"t\":true,\"f\":\"FALSE\","
+                + "\"x\":\"1.\",\"y\":\".5\",\"\":\"empty\"}", data.toJson());
+        // WHATWG UTF-8 decode: one U+FFFD per invalid byte subsequence (URLSearchParams in node and Bun)
+        assertEquals("\uFFFD\uFFFD\uFFFD\uD83D\uDE00\uFFFD\uFFFD\uFFFDx",
+                Altcha.parseVerificationData("s=%ED%A0%80%F0%9F%98%80%C3%E0%80x").get("s"));
+    }
+
+    @Test
+    public void testVerifyServerSignatureResultLikeJs() throws Exception {
+        var valid    = signedServerPayload("verified=true&score=0.5");
+        var tampered = new Altcha.ServerSignaturePayload("SHA-256", null, null,
+                valid.verificationData(), "00".repeat(32), true);
+        var notVerified = signedServerPayload("verified=false");
+
+        var bad = Altcha.verifyServerSignature(tampered, HMAC_SECRET);
+        assertFalse(bad.verified());
+        assertTrue(bad.invalidSignature());
+        assertFalse(bad.invalidSolution());
+        assertFalse(bad.expired());
+
+        var unverified = Altcha.verifyServerSignature(notVerified, HMAC_SECRET);
+        assertFalse(unverified.verified());
+        assertFalse(unverified.invalidSignature());
+        assertTrue(unverified.invalidSolution());
+
+        // Same keys and order as the JS result: {expired, invalidSignature, invalidSolution, time, verificationData, verified}
+        var json = Altcha.verifyServerSignature(valid, HMAC_SECRET).toJson();
+        assertTrue(json.matches("\\{\"expired\":false,\"invalidSignature\":false,\"invalidSolution\":false,"
+                + "\"time\":[0-9.]+,\"verificationData\":\\{\"verified\":true,\"score\":0\\.5},\"verified\":true}"), json);
     }
 
     private static Altcha.ServerSignaturePayload signedServerPayload(String verData) throws Exception {
@@ -1063,6 +1122,9 @@ public class AltchaV2Test {
         assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + now), HMAC_SECRET).verified());
         assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + (now + 60)), HMAC_SECRET).verified());
         assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=0"), HMAC_SECRET).verified());
+        // Non-numeric strings are coerced like JS: "-5" → -5 (expired), "abc" → NaN (not expired)
+        assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=-5"), HMAC_SECRET).expired());
+        assertFalse(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=abc"), HMAC_SECRET).expired());
     }
 
     // -------------------------------------------------------------------------
