@@ -367,6 +367,25 @@ public class AltchaV2Test {
     }
 
     @Test
+    public void testVerifySolutionExpiredWithinCurrentSecond() throws Exception {
+        // Move at least 100 ms into the current second, then expire at its start: already in the past.
+        Thread.sleep(Math.max(0, 100 - System.currentTimeMillis() % 1000));
+        var expiresAt = System.currentTimeMillis() / 1000;
+        var challenge = Altcha.createChallenge(new Altcha.CreateChallengeOptions()
+                .algorithm("SHA-256")
+                .cost(10)
+                .expiresAt(expiresAt)
+                .hmacSignatureSecret(HMAC_SECRET));
+        var kdf       = Altcha.kdf("SHA-256");
+        var solution  = Altcha.solveChallenge(challenge, kdf);
+
+        var result = Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf);
+
+        assertFalse(result.verified());
+        assertTrue(result.expired());
+    }
+
+    @Test
     public void testVerifySolutionNoSignature() throws Exception {
         var opts = new Altcha.CreateChallengeOptions()
                 .algorithm("SHA-256")

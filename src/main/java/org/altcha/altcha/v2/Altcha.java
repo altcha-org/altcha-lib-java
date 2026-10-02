@@ -499,8 +499,8 @@ public final class Altcha {
         var t0     = System.nanoTime();
         var params = challenge.parameters();
 
-        // 1. Expiry
-        if (params.expiresAt() != null && params.expiresAt() < System.currentTimeMillis() / 1000) {
+        // 1. Expiry (against fractional seconds, like JS `expiresAt < Date.now() / 1000`)
+        if (params.expiresAt() != null && params.expiresAt() < System.currentTimeMillis() / 1000.0) {
             return new VerifySolutionResult(false, true, null, null, elapsed(t0));
         }
 
