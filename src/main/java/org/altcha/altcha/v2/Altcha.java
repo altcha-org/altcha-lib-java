@@ -546,8 +546,9 @@ public final class Altcha {
      * @param solution             the solution submitted by the client
      * @param hmacSignatureSecret     the secret used when the challenge was signed (required)
      * @param hmacKeySignatureSecret  optional secret for fast key-signature verification
-     * @param hmacAlgorithm           HMAC algorithm used when the challenge was signed
-     *                                ({@code "SHA-256"}, {@code "SHA-384"} or {@code "SHA-512"});
+     * @param hmacAlgorithm           HMAC algorithm used when the challenge was signed: a WebCrypto
+     *                                hash name ({@code "SHA-256"}, {@code "SHA-384"}, {@code "SHA-512"}
+     *                                or {@code "SHA-1"}, case-insensitive; others throw);
      *                                {@code null} means {@link #DEFAULT_HMAC_ALGORITHM}
      * @param counterMode             counter encoding used when re-deriving; must match the
      *                                creator's ({@code null} means {@link CounterMode#UINT32})
@@ -736,9 +737,22 @@ public final class Altcha {
     public static VerifySolutionResult verifySolution(String base64Payload,
             String hmacSignatureSecret, String hmacKeySignatureSecret, KeyDerivationFunction kdfFn)
             throws Exception {
+        return verifySolution(base64Payload, hmacSignatureSecret, hmacKeySignatureSecret, null, null, kdfFn);
+    }
+
+    /**
+     * Decodes and verifies a base64-encoded v2 payload with an explicit HMAC algorithm and
+     * counter mode; both must match the options the challenge was created with
+     * ({@code null} means {@link #DEFAULT_HMAC_ALGORITHM} / {@link CounterMode#UINT32}).
+     *
+     * @see #verifySolution(Challenge, Solution, String, String, String, CounterMode, KeyDerivationFunction)
+     */
+    public static VerifySolutionResult verifySolution(String base64Payload,
+            String hmacSignatureSecret, String hmacKeySignatureSecret, String hmacAlgorithm,
+            CounterMode counterMode, KeyDerivationFunction kdfFn) throws Exception {
         var payload = parsePayload(base64Payload);
         return verifySolution(payload.challenge(), payload.solution(),
-                hmacSignatureSecret, hmacKeySignatureSecret, kdfFn);
+                hmacSignatureSecret, hmacKeySignatureSecret, hmacAlgorithm, counterMode, kdfFn);
     }
 
     // -------------------------------------------------------------------------
@@ -975,10 +989,12 @@ public final class Altcha {
         return Double.NaN;
     }
 
+    // Possessive quantifiers: the input is attacker-controlled (Sentinel `expire`), and a backtracking
+    // `\d+\.?\d*` makes matches() quadratic on long digit runs.
     private static final Pattern JS_DECIMAL_LITERAL =
-            Pattern.compile("[+-]?(?:Infinity|(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][+-]?\\d+)?)");
+            Pattern.compile("[+-]?+(?:Infinity|(?:\\d++(?:\\.\\d*+)?|\\.\\d++)(?:[eE][+-]?+\\d++)?)");
     private static final Pattern JS_NON_DECIMAL_LITERAL =
-            Pattern.compile("0(?:[xX][0-9a-fA-F]+|[oO][0-7]+|[bB][01]+)");
+            Pattern.compile("0(?:[xX][0-9a-fA-F]++|[oO][0-7]++|[bB][01]++)");
 
     /** JS {@code StringToNumber}. */
     private static double jsStringToNumber(String s) {
@@ -990,7 +1006,14 @@ public final class Altcha {
         }
         if (JS_NON_DECIMAL_LITERAL.matcher(t).matches()) {
             var radix = switch (Character.toLowerCase(t.charAt(1))) { case 'x' -> 16; case 'o' -> 8; default -> 2; };
-            return new BigInteger(t.substring(2), radix).doubleValue();
+            var bitsPerDigit = Integer.numberOfTrailingZeros(radix);
+            var first = 2;
+            while (first < t.length() && t.charAt(first) == '0') first++;
+            if (first == t.length()) return 0;
+            // value >= radix^(digits-1) >= 2^1024 rounds to Infinity; bounding the digits keeps
+            // BigInteger parsing (quadratic) to at most ~1024 bits.
+            if ((long) (t.length() - first - 1) * bitsPerDigit >= 1024) return Double.POSITIVE_INFINITY;
+            return new BigInteger(t.substring(first), radix).doubleValue();
         }
         return Double.NaN;
     }
@@ -1153,13 +1176,6 @@ public final class Altcha {
                 if (candidate.doubleValue() == d) return candidate.stripTrailingZeros();
             }
         }
-    }
-
-    /** Returns a JSON-escaped quoted string, identical to JS {@code JSON.stringify}. */
-    static String jsonString(String s) {
-        var sb = new StringBuilder(s.length() + 2);
-        appendJsonString(sb, s);
-        return sb.toString();
     }
 
     private static void appendJsonString(StringBuilder sb, String s) {

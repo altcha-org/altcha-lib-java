@@ -109,6 +109,10 @@ Altcha.VerifySolutionResult result = Altcha.verifySolution(
         "your-secret-key",
         Altcha.kdf("PBKDF2/SHA-256"));
 
+// Challenges created with hmacAlgorithm / counterMode must be verified with the same values:
+Altcha.VerifySolutionResult result384 = Altcha.verifySolution(
+        base64Payload, "your-secret-key", null, "SHA-384", null, Altcha.kdf("PBKDF2/SHA-256"));
+
 if (result.verified()) {
     // accept
 } else if (result.expired()) {
@@ -229,9 +233,10 @@ Verification data is parsed like the JavaScript library's `parseVerificationData
 | `solveChallenge(Challenge, KeyDerivationFunction, long, long, Duration, CounterMode)` | `Solution` | Same, with a counter mode (`null` = `UINT32`) |
 | `verifySolution(String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies a base64 JSON payload from the client |
 | `verifySolution(String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with optional key-signature secret (fast path; KDF may be `null`) |
+| `verifySolution(String, String, String, String, CounterMode, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with HMAC algorithm and counter mode (`null` = `SHA-256` / `UINT32`) |
 | `verifySolution(Challenge, Solution, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies typed challenge + solution objects |
 | `verifySolution(Challenge, Solution, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Verifies with optional key-signature secret (fast path) |
-| `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (`SHA-256`/`SHA-384`/`SHA-512`, case-insensitive; `null` = `SHA-256`; other names throw) for challenges created with `hmacAlgorithm` |
+| `verifySolution(Challenge, Solution, String, String, String, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with explicit HMAC algorithm (WebCrypto names `SHA-256`/`SHA-384`/`SHA-512`/`SHA-1`, case-insensitive; `null` = `SHA-256`; other names throw) for challenges created with `hmacAlgorithm` |
 | `verifySolution(Challenge, Solution, String, String, String, CounterMode, KeyDerivationFunction)` | `VerifySolutionResult` | Same, with a counter mode (`null` = `UINT32`) |
 | `parsePayload(String)` | `Payload` | Decodes a base64 JSON payload into typed objects |
 | `isServerSignaturePayload(String)` | `boolean` | Returns `true` if the payload is from the Sentinel service |

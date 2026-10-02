@@ -80,10 +80,10 @@ public class AltchaV2Test {
     }
 
     @Test
-    public void testJsonStringEscaping() {
-        assertEquals("\"hello\\\"world\"", Altcha.jsonString("hello\"world"));
-        assertEquals("\"line\\nbreak\"",   Altcha.jsonString("line\nbreak"));
-        assertEquals("\"tab\\there\"",     Altcha.jsonString("tab\there"));
+    public void testCanonicalJsonStringEscapingLikeJs() {
+        // Expected: JSON.stringify (node); U+007F and U+2028 stay raw
+        assertEquals("{\"s\":\"hello\\\"world\\nbreak\\ttab\\\\\\u0001\\u001f\u007f\u2028\\b\\f\\r\"}",
+                canonicalData(Map.of("s", "hello\"world\nbreak\ttab\\\u0001\u001f\u007f\u2028\b\f\r")));
     }
 
     @ParameterizedTest
@@ -732,6 +732,13 @@ public class AltchaV2Test {
         var mismatched = Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf);
         assertFalse(mismatched.verified());
         assertTrue(mismatched.invalidSignature());
+
+        // Same through the base64 entry point
+        var json   = "{\"challenge\":" + challenge.toJson() + ",\"solution\":{\"counter\":" + solution.counter()
+                + ",\"derivedKey\":\"" + solution.derivedKey() + "\"}}";
+        var base64 = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        assertTrue(Altcha.verifySolution(base64, HMAC_SECRET, null, hmacAlgorithm, null, kdf).verified());
+        assertTrue(Altcha.verifySolution(base64, HMAC_SECRET, kdf).invalidSignature());
     }
 
     @ParameterizedTest
@@ -1125,6 +1132,18 @@ public class AltchaV2Test {
         // Non-numeric strings are coerced like JS: "-5" → -5 (expired), "abc" → NaN (not expired)
         assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=-5"), HMAC_SECRET).expired());
         assertFalse(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=abc"), HMAC_SECRET).expired());
+    }
+
+    @Test
+    public void testVerifyServerSignatureExpireCoercionIsLinear() {
+        // Unauthenticated input: these took 16-41 s with a backtracking regex / unbounded BigInteger.
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            assertFalse(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=" + "1".repeat(100_000) + "x"), HMAC_SECRET).expired());
+            // 0x fff…f (1M digits) ≥ 2^1024 → Infinity, like JS Number()
+            assertFalse(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=0x" + "f".repeat(1_000_000)), HMAC_SECRET).expired());
+            // Leading zeros don't count towards the size: 0x000…01 == 1 → expired
+            assertTrue(Altcha.verifyServerSignature(signedServerPayload("verified=true&expire=0x" + "0".repeat(1_000_000) + "1"), HMAC_SECRET).expired());
+        });
     }
 
     // -------------------------------------------------------------------------
