@@ -2,6 +2,7 @@ package org.altcha.altcha.v2;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
@@ -214,6 +215,28 @@ public class AltchaV2Test {
         assertNotNull(solution.derivedKey());
         assertTrue(solution.derivedKey().startsWith("00"),
                 "derived key must start with keyPrefix '00'");
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            // keyPrefix, expected counter, expected derived key (from the JS reference, altcha-lib v2)
+            "a,   20, a1ec80b3",
+            "f2e, 42, f2e25aab6d5e504747ad0f52b1ce42afd99d8014634f263ea42b206300037acf",
+            "f2,  42, f2e25aab6d5e504747ad0f52b1ce42afd99d8014634f263ea42b206300037acf",
+    })
+    public void testSolveChallengeKeyPrefixMatchesReference(String keyPrefix, int expectedCounter,
+            String expectedKey) throws Exception {
+        var params = new Altcha.ChallengeParameters(
+                "PBKDF2/SHA-256", "aabbccdd00112233aabbccdd00112233", "11223344556677889900aabbccddeeff",
+                1000, 32, keyPrefix, null, null, null, null, null);
+        var challenge = Altcha.signChallenge(Altcha.DEFAULT_HMAC_ALGORITHM, params, null, HMAC_SECRET, null);
+        var kdf       = Altcha.kdf("PBKDF2/SHA-256");
+
+        var solution = Altcha.solveChallenge(challenge, kdf);
+
+        assertEquals(expectedCounter, solution.counter());
+        assertTrue(solution.derivedKey().startsWith(expectedKey));
+        assertTrue(Altcha.verifySolution(challenge, solution, HMAC_SECRET, kdf).verified());
     }
 
     // -------------------------------------------------------------------------

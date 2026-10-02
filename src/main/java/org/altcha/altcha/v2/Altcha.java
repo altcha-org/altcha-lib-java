@@ -430,15 +430,17 @@ public final class Altcha {
         var params        = challenge.parameters();
         var nonceBuf      = hexToBytes(params.nonce());
         var saltBuf       = hexToBytes(params.salt());
-        var keyPrefixBuf  = hexToBytes(params.keyPrefix());
+        var keyPrefix     = params.keyPrefix();
+        // Even-length prefix: byte compare. Odd-length: lowercase hex string prefix match (as in the JS reference).
+        var keyPrefixBuf  = keyPrefix.length() % 2 == 0 ? hexToBytes(keyPrefix) : null;
         var pw            = new PasswordBuffer(nonceBuf);
         var t0            = System.nanoTime();
         var counter       = counterStart;
 
         while (true) {
-            var result = kdfFn.deriveKey(params, saltBuf, pw.setCounter(counter));
-            if (startsWith(result.derivedKey(), keyPrefixBuf)) {
-                return new Solution(counter, bytesToHex(result.derivedKey()),
+            var derivedKey = kdfFn.deriveKey(params, saltBuf, pw.setCounter(counter)).derivedKey();
+            if (keyPrefixBuf != null ? startsWith(derivedKey, keyPrefixBuf) : hexStartsWith(derivedKey, keyPrefix)) {
+                return new Solution(counter, bytesToHex(derivedKey),
                         TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - t0));
             }
             counter += counterStep;
@@ -866,6 +868,17 @@ public final class Altcha {
     static byte[] hexToBytes(String hex) {
         if (hex.length() % 2 != 0) throw new IllegalArgumentException("Hex string must have even length: " + hex);
         return HexFormat.of().parseHex(hex);
+    }
+
+    /** Equivalent to {@code bytesToHex(buffer).startsWith(hexPrefix)} without allocating. */
+    static boolean hexStartsWith(byte[] buffer, String hexPrefix) {
+        if (hexPrefix.length() > buffer.length * 2) return false;
+        for (var i = 0; i < hexPrefix.length(); i++) {
+            var b      = buffer[i >> 1];
+            var nibble = (i & 1) == 0 ? (b >> 4) & 0x0f : b & 0x0f;
+            if (hexPrefix.charAt(i) != Character.forDigit(nibble, 16)) return false;
+        }
+        return true;
     }
 
     public static String bytesToHex(byte[] bytes) {
